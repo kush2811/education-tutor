@@ -36,3 +36,4 @@ class KnowledgeBaseService:
 
 
 knowledge_base_service = KnowledgeBaseService()
+

@@ -29,3 +29,4 @@ class SubtitleAligner:
 
 
 subtitle_aligner = SubtitleAligner()
+

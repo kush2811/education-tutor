@@ -56,7 +56,15 @@ def test_auth_registration_and_login(client: TestClient):
     me_data = me_res.json()
     assert me_data["email"] == "student1@example.com"
 
-    # 4. Fail login with wrong password
+    # 4. Test dashboard endpoint
+    dash_res = client.get("/api/v1/users/dashboard", headers=headers)
+    assert dash_res.status_code == 200
+    dash_data = dash_res.json()
+    assert dash_data["user_id"] == user_data["id"]
+    assert "total_sessions" in dash_data
+    assert "recommended_topics" in dash_data
+
+    # 5. Fail login with wrong password
     bad_login = client.post("/api/v1/auth/login", json={"email": "student1@example.com", "password": "WrongPassword"})
     assert bad_login.status_code == 401
 

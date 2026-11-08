@@ -28,3 +28,4 @@ class FileUploadResponse(BaseModel):
     file_size: int
     status: str
     message: str
+

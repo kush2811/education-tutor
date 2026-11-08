@@ -103,3 +103,4 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
 def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
     """Retrieve details of the currently authenticated student."""
     return current_user
+

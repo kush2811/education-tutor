@@ -34,3 +34,4 @@ class VoiceService:
 
 
 voice_service = VoiceService()
+

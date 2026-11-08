@@ -120,3 +120,4 @@ def get_asset(asset_id: str, db: Session = Depends(get_db)) -> AssetResponse:
             detail=f"Asset '{asset_id}' not found."
         )
     return asset
+

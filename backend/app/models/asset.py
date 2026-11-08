@@ -25,3 +25,4 @@ class UploadedAsset(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="assets")
     session: Mapped["StudySession"] = relationship("StudySession", back_populates="assets")
+

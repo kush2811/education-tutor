@@ -71,6 +71,28 @@ export const api = {
     return res.json();
   },
 
+  async updateProfile(data: { full_name?: string; grade_level?: string }): Promise<User> {
+    const res = await fetch(`${API_BASE_URL}/users/profile`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      throw new Error('Failed to update profile');
+    }
+    return res.json();
+  },
+
+  async getDashboardStats(): Promise<import('../types').DashboardStats> {
+    const res = await fetch(`${API_BASE_URL}/users/dashboard`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error('Failed to load dashboard statistics');
+    }
+    return res.json();
+  },
+
   // --- Sessions & Messages ---
   async listSessions(studentId = 'default_student'): Promise<StudySession[]> {
     const res = await fetch(`${API_BASE_URL}/sessions?student_id=${encodeURIComponent(studentId)}`, {

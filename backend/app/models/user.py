@@ -23,3 +23,4 @@ class User(Base):
     # Relationships
     sessions: Mapped[list["StudySession"]] = relationship("StudySession", back_populates="user", cascade="all, delete-orphan")
     assets: Mapped[list["UploadedAsset"]] = relationship("UploadedAsset", back_populates="user", cascade="all, delete-orphan")
+

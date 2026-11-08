@@ -32,3 +32,27 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class RecentSessionItem(BaseModel):
+    """Brief session item for dashboard."""
+    id: str
+    title: str
+    subject: str
+    status: str
+    message_count: int
+    updated_at: datetime
+
+
+class DashboardStatsResponse(BaseModel):
+    """Aggregated learning metrics for student dashboard."""
+    user_id: str
+    full_name: str
+    grade_level: str
+    total_sessions: int
+    total_messages: int
+    total_uploads: int
+    active_streak_days: int
+    recent_sessions: list[RecentSessionItem]
+    recommended_topics: list[str]
+
