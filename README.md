@@ -74,7 +74,8 @@ ai-multimodal-tutor/
 │   │   │       │   ├── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
 │   │   │       │   ├── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
 │   │   │       │   ├── tutor.py         # AI Tutor endpoints: /solve, /math, /code, /study-aid, /practice, /chat
-│   │   │       │   └── validation.py    # Answer validation & hallucination control: /validate-answer, /check-citations
+│   │   │       │   ├── validation.py    # Answer validation & hallucination control: /validate-answer, /check-citations
+│   │   │       │   └── voice.py         # Text-to-speech & synchronized subtitles: /generate, /audio, /normalize
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
@@ -99,7 +100,8 @@ ai-multimodal-tutor/
 │   │   │   ├── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
 │   │   │   ├── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
 │   │   │   ├── tutor.py                 # Pydantic models for problem solving, math, code, study aids & practice
-│   │   │   └── validation.py            # Grounding status, citation audits, source conflicts & consistency schemas
+│   │   │   ├── validation.py            # Grounding status, citation audits, source conflicts & consistency schemas
+│   │   │   └── voice.py                 # TTS request/response, timestamped sentence and word segment schemas
 │   │   ├── services/
 │   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
 │   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
@@ -131,7 +133,9 @@ ai-multimodal-tutor/
 │   │   │   ├── source_grounding_checker.py # Factual assertion grounding & insufficient context detector
 │   │   │   ├── source_conflict_detector.py # Academic convention & duality contradiction resolver (Authority hierarchy)
 │   │   │   ├── answer_consistency_checker.py # Question relevance, logic flow, SymPy arithmetic & AST code safety
-│   │   │   └── answer_validator.py      # Master validation & hallucination control coordinator
+│   │   │   ├── answer_validator.py      # Master validation & hallucination control coordinator
+│   │   │   ├── speech_normalizer.py     # Educational speech normalizer: LaTeX math, code summaries, tables, headings
+│   │   │   └── voice_service.py         # Neural edge-tts voice synthesis & timestamped sentence/word aligner
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
@@ -140,7 +144,8 @@ ai-multimodal-tutor/
 │   │   ├── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
 │   │   ├── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
 │   │   ├── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
-│   │   └── test_validation.py           # Phase 7 answer validation, citations, conflicts & consistency test suite
+│   │   ├── test_validation.py           # Phase 7 answer validation, citations, conflicts & consistency test suite
+│   │   └── test_voice.py                # Phase 8 TTS voice generation, subtitles & speech normalization test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -270,10 +275,60 @@ npm run build
 | **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed & Approved |
 | **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed & Approved |
 | **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed & Approved |
-| **Phase 7** | **Answer Validation & Hallucination Control (Grounding, Citations, Consistency)** | ✅ Completed (Awaiting Phase 8 Approval) |
-| **Phase 8** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued for Next Phase |
-| **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
+| **Phase 7** | **Answer Validation & Hallucination Control (Grounding, Citations, Consistency)** | ✅ Completed & Approved |
+| **Phase 8** | **Text-to-Speech and Synchronized Subtitles (Neural Voice, Word Alignment, Scrubber)** | ✅ Completed (Awaiting Phase 9 Approval) |
+| **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued for Next Phase |
 | **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 🎙️ Phase 8: Text-to-Speech and Synchronized Subtitles
+
+Phase 8 elevates the student tutor into a multi-sensory educational experience by combining natural neural speech synthesis with millisecond-accurate synchronized subtitle and word highlighting.
+
+### 1. Neural TTS Integration (`VoiceService`, `/api/v1/voice/`)
+- Integrates high-fidelity Microsoft neural voices via `edge-tts` (`en-US-AriaNeural`, `en-US-GuyNeural`, `en-US-JennyNeural`, `en-US-ChristopherNeural`).
+- Produces natural human cadence, conversational pacing, and accurate STEM pronunciation.
+- Streams generated MP3 files directly from `./storage/audio/` via `/api/v1/voice/audio/{filename}`.
+
+### 2. Timestamp Alignment & Subtitle Synchronizer
+- Captures native 100-nanosecond tick `SentenceBoundary` events directly from the neural speech engine.
+- Derives proportional word-level timestamps (`WordSegment`) bounded within the sentence duration, ensuring smooth visual tracking.
+- Returns structured responses pairing original markdown display sentences with their exact start and end timestamps.
+
+### 3. Structured Educational Speech Normalizer (`speech_normalizer.py`)
+- **Mathematical LaTeX Processing:** Converts raw formulas into conversational spoken phrases:
+  - `$$F = ma$$` $\rightarrow$ `"F equals m times a"`
+  - `\frac{1}{2} m v^2` $\rightarrow$ `"1 over 2 m times v squared"`
+  - `\sqrt{a^2 + b^2}` $\rightarrow$ `"the square root of a squared plus b squared"`
+  - `\lim_{x \to 0}` $\rightarrow$ `"the limit as x approaches 0 of"`
+  - `\int_{0}^{\pi}` $\rightarrow$ `"the integral from 0 to pi of"`
+  - Handles Greek letters (`\theta`, `\pi`, `\mu`, `\Delta`), operators (`\times`, `\pm`, `\approx`, `\le`), and implicit multiplication (`ma`, `mc^2`).
+- **Code Block Summarization:** Eliminates confusing syntax recitations (`open paren`, `curly brace`, `semicolon`), summarizing code blocks cleanly:
+  *"Here is a Python code implementation defining the function binary search to execute this logic."*
+- **Markdown Tables:** Flattens tabular matrices into spoken row sentences (`Row 1: [col1] is [val1]`).
+- **Citation Cleaning:** Strips bracket citations (`[1]`, `[2]`, `[99]`) from spoken speech to maintain natural narrative flow.
+
+### 4. Interactive Voice Player Dock (`VoicePlayer.tsx`)
+- **Active Sentence Highlighting:** Prominently highlights the sentence actively being spoken with smooth border and background accents.
+- **Word-Level Highlighting:** Dynamically animates the specific word being articulated inside the active sentence.
+- **Automatic Scrolling:** Automatically scrolls long explanations to keep the active sentence continuously visible.
+- **Playback Controls:** Full Play, Pause, Resume, Replay, and Previous/Next sentence navigation.
+- **Timeline Scrubber:** Interactive range scrubber allowing students to drag and seek to any second of the audio, automatically realigning active sentence markers.
+- **Playback Speed Selector:** Multi-speed options ($0.75\times, 1.0\times, 1.25\times, 1.5\times, 2.0\times$) adjusting both audio playback and visual progression synchronously.
+- **Interactive Sentence Clicking:** Clicking any sentence in the subtitle list instantly jumps audio playback to that sentence's start timestamp.
+
+### 5. Text-Only Mode
+- Provides a one-click toggle to collapse audio playback and switch to quiet reading mode, allowing students to study without audio distraction.
+
+### 6. Robust Fallback & Error Resilience
+- If network access or cloud neural TTS is unavailable, the backend automatically transitions to `forced_alignment_fallback`.
+- Accurately models academic speaking rates ($150\text{ words/minute}$) and sentence boundaries, enabling the frontend to seamlessly play via client-side `window.speechSynthesis` while maintaining 100% of the synchronized highlighting features.
+
+### 7. Endpoints
+- `POST /api/v1/voice/generate`: Converts educational markdown text into neural MP3 audio with aligned sentence and word segments.
+- `GET /api/v1/voice/audio/{filename}`: Securely streams synthesized MP3 files with hash-based filename validation.
+- `POST /api/v1/voice/normalize`: Returns the spoken speech script and sentence pairs without audio synthesis.
 
 ---
 

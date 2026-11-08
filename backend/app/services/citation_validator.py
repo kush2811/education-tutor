@@ -172,3 +172,4 @@ class CitationValidator:
 
 
 citation_validator = CitationValidator()
+

@@ -150,3 +150,4 @@ class SourceConflictDetector:
 
 
 source_conflict_detector = SourceConflictDetector()
+

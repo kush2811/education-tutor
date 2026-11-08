@@ -68,7 +68,35 @@ export interface RecentSessionItem {
   subject: string;
   status: string;
   message_count: number;
+  created_at: string;
   updated_at: string;
+}
+
+export interface WordSegment {
+  word: string;
+  start_time: number;
+  end_time: number;
+}
+
+export interface SentenceSegment {
+  sentence_index: number;
+  display_text: string;
+  spoken_text: string;
+  start_time: number;
+  end_time: number;
+  words: WordSegment[];
+}
+
+export interface TTSVoiceResponse {
+  complete_answer_text: string;
+  spoken_text: string;
+  audio_url: string | null;
+  duration_seconds: number;
+  sentence_segments: SentenceSegment[];
+  voice_used: string;
+  alignment_method: string;
+  audio_format: string;
+  error?: string;
 }
 
 export interface DashboardStats {

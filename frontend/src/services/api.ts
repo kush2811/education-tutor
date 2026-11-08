@@ -172,5 +172,40 @@ export const api = {
       throw new Error(err.detail || 'File upload failed');
     }
     return res.json();
+  },
+
+  // --- Voice & TTS ---
+  async generateVoice(data: {
+    text: string;
+    voice?: string;
+    rate?: string;
+    pitch?: string;
+  }): Promise<import('../types').TTSVoiceResponse> {
+    const res = await fetch(`${API_BASE_URL}/voice/generate`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Voice generation failed');
+    }
+    return res.json();
+  },
+
+  async normalizeSpeech(text: string): Promise<{
+    original_text: string;
+    spoken_script: string;
+    sentence_pairs: Array<{ display_text: string; spoken_text: string }>;
+  }> {
+    const res = await fetch(`${API_BASE_URL}/voice/normalize`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      throw new Error('Speech normalization failed');
+    }
+    return res.json();
   }
 };

@@ -392,3 +392,4 @@ def test_validation_api_endpoints(sample_chunk_ncert, sample_citation_ncert):
     data4 = r4.json()
     assert data4["addresses_question"] is True
     assert data4["calculations_consistent"] is True
+
