@@ -10,7 +10,8 @@ from app.core.logging import logger
 
 # Maximum Allowed File Sizes (in bytes)
 MAX_FILE_SIZES = {
-    "text": 64 * 1024,              # 64 KB
+    "text": 10 * 1024 * 1024,        # 10 MB (educational markdown / source notes)
+    "html": 25 * 1024 * 1024,        # 25 MB (HTML textbooks / pages)
     "image": 20 * 1024 * 1024,       # 20 MB
     "pdf": 50 * 1024 * 1024,         # 50 MB
     "docx": 25 * 1024 * 1024,        # 25 MB
@@ -30,6 +31,11 @@ ALLOWED_MIMES = {
     "application/pdf": ("pdf", ".pdf"),
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ("docx", ".docx"),
     "application/msword": ("docx", ".doc"),
+    "text/plain": ("text", ".txt"),
+    "text/markdown": ("text", ".md"),
+    "text/x-markdown": ("text", ".md"),
+    "text/html": ("html", ".html"),
+    "application/xhtml+xml": ("html", ".html"),
     # Audio
     "audio/wav": ("audio", ".wav"),
     "audio/x-wav": ("audio", ".wav"),
@@ -139,3 +145,4 @@ def cleanup_temp_file(file_path: Optional[str]) -> None:
             logger.info(f"Cleaned up temporary file: {file_path}")
         except Exception as e:
             logger.warning(f"Could not remove temp file {file_path}: {e}")
+

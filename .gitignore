@@ -48,7 +48,8 @@ pnpm-debug.log*
 *.sqlite3
 *.db
 uploads/
-storage/vector_store/
+storage/
+**/storage/
 
 # IDE & OS
 .vscode/

@@ -186,3 +186,4 @@ class VideoProcessor:
 
 
 video_processor = VideoProcessor()
+

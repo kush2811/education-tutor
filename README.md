@@ -70,7 +70,8 @@ ai-multimodal-tutor/
 │   │   │       │   ├── user.py          # Student profile management & dashboard analytics
 │   │   │       │   ├── health.py        # System health & DB readiness endpoint
 │   │   │       │   ├── session.py       # Tutoring session & message CRUD (Conversations)
-│   │   │       │   └── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
+│   │   │       │   ├── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
+│   │   │       │   └── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
@@ -83,14 +84,16 @@ ai-multimodal-tutor/
 │   │   ├── models/
 │   │   │   ├── user.py                  # User / Student profile ORM model
 │   │   │   ├── session.py               # StudySession & SessionMessage ORM models
-│   │   │   └── asset.py                 # UploadedAsset ORM model
+│   │   │   ├── asset.py                 # UploadedAsset ORM model
+│   │   │   └── knowledge.py             # EducationalSource, KnowledgeDocument, DocumentChunk, QualityReport
 │   │   ├── schemas/
 │   │   │   ├── health.py                # Health check response schemas
 │   │   │   ├── auth.py                  # Login, registration, token schemas
 │   │   │   ├── user.py                  # User profile schemas
 │   │   │   ├── session.py               # Session & Message request/response schemas
 │   │   │   ├── asset.py                 # Uploaded file schemas
-│   │   │   └── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
+│   │   │   ├── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
+│   │   │   └── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
 │   │   ├── services/
 │   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
 │   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
@@ -98,12 +101,21 @@ ai-multimodal-tutor/
 │   │   │   ├── docx_processor.py        # python-docx structured hierarchy parser
 │   │   │   ├── audio_processor.py       # Audio STT with Gemini & offline fallback
 │   │   │   ├── video_processor.py       # 30s keyframe sampling & multimodal audio/visual fusion
-│   │   │   └── unified_pipeline.py      # Master input router to UnifiedQuestionPayload
+│   │   │   ├── unified_pipeline.py      # Master input router to UnifiedQuestionPayload
+│   │   │   ├── knowledge_sources.py     # Source registry & legal compliance validation
+│   │   │   ├── knowledge_cleaner.py     # Text cleaning, boilerplate & duplicate removal
+│   │   │   ├── knowledge_extractor.py   # Multi-format doc extractor (PDF, DOCX, HTML, TXT)
+│   │   │   ├── educational_chunker.py   # Concept-aware semantic chunking with formula retention
+│   │   │   ├── embedding_service.py     # Gemini text-embedding-004 + 768-dim local projection
+│   │   │   ├── vector_store.py          # Persistent ChromaDB vector store collection manager
+│   │   │   ├── data_quality.py          # Validation auditing for missing text & duplicate chunks
+│   │   │   └── knowledge_manager.py     # Knowledge lifecycle, duplicate detection, versioning
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
 │   │   ├── test_api.py                  # Health, Auth, Session & Upload test suite
-│   │   └── test_multimodal.py           # Comprehensive multimodal ingestion test suite
+│   │   ├── test_multimodal.py           # Comprehensive multimodal ingestion test suite
+│   │   └── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -235,13 +247,50 @@ npm run build
 | **Phase 0** | **Project Analysis & System Architecture** | ✅ Completed & Approved |
 | **Phase 1** | **Project Setup & Foundation (FastAPI, SQLite, React, Vite, Tailwind)** | ✅ Completed & Approved |
 | **Phase 2** | **Student Interface & Authentication (Dashboard, Socratic Chat, Voice Dock)** | ✅ Completed & Approved |
-| **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed (Awaiting Approval) |
-| **Phase 4** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Phase 4 |
-| **Phase 5** | **Knowledge Retrieval & Verifiable RAG System (ChromaDB + Textbook Indexing)**| ⏳ Queued |
-| **Phase 6** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued |
-| **Phase 7** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
-| **Phase 8** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
-| **Phase 9** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+| **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed & Approved |
+| **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed (Awaiting Approval) |
+| **Phase 5** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Next Phase |
+| **Phase 6** | **Knowledge Retrieval & Verifiable RAG System (Cross-Encoder Reranking & Citations)**| ⏳ Queued |
+| **Phase 7** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued |
+| **Phase 8** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
+| **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
+| **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 📚 Phase 4: Educational Knowledge Base Architecture
+
+The educational knowledge base system decouples tutoring answers from pure LLM memory, anchoring all reasoning in legally verified curricula.
+
+### 1. Authoritative Source Registry (`/api/v1/knowledge/sources`)
+- Pre-seeded with official, legally compliant educational sources across 6 categories:
+  - **NCERT Resources:** Mathematics Grade 10, Physics Grade 11, Chemistry Grade 12 (Fair Dealing).
+  - **Government Educational Portals:** ePathshala, NPTEL IIT Madras (CC BY-NC-SA 4.0).
+  - **Official University Materials:** OpenStax University Physics & Calculus (CC BY 4.0), MIT OpenCourseWare (CC BY-NC-SA 4.0).
+  - **Open Educational Resources (OER):** LibreTexts STEM, Khan Academy.
+  - **Official Programming Documentation:** Python 3 Official Docs (PSF License), MDN Web Docs (CC-BY-SA 2.5+).
+  - **Academic Research Sources:** arXiv.org Open STEM Preprints.
+
+### 2. Multi-Format Ingestion Pipeline (`/api/v1/knowledge/documents/ingest`)
+- **Supported Formats:** PDF (PyMuPDF), DOCX (python-docx), HTML (BeautifulSoup4), and TXT/Markdown.
+- **Structural Extraction:** Preserves heading hierarchies (H1-H4), tables as Markdown grids, exact page numbers, and LaTeX equations (`$...$`, `$$...$$`).
+- **Boilerplate & Noise Cleaning:** Automatically detects and removes textbook running headers, footers, duplicate lines, and publisher watermarks.
+
+### 3. Concept-Aware Semantic Chunking
+- Splits content along natural sentence and concept boundaries without bisecting mathematical formulas.
+- Automatically isolates major chapters and sections to prevent concept bleeding across unrelated topics.
+- Every chunk embeds immutable metadata: `document_id`, `source_id`, `chapter`, `section`, `page_number`, `extracted_math`, and `sha256_hash`.
+
+### 4. Vector Storage & High-Dimension Embeddings
+- **ChromaDB Vector Store:** Embedded persistent HNSW vector indexing located in `./storage/vector_store` under the `educational_curriculum` collection.
+- **Dual-Tier Embeddings:** 768-dimensional normalized dense vectors via Google Gemini `text-embedding-004` (cloud) or high-resolution feature hashing projection (offline deterministic fallback).
+
+### 5. Knowledge Lifecycle & Quality Validation
+- **Duplicate Document Detection:** Computes SHA-256 file checksums before ingestion; prevents redundant indexing.
+- **Document Versioning & Re-indexing:** Increments version (`v1`, `v2`, etc.), automatically purges outdated chunks from ChromaDB and SQLite, and indexes updated materials.
+- **Data Quality Audits (`/api/v1/knowledge/quality/reports`):** Validates documents for missing text (< 50 chars), duplicate chunk hashes, unsupported formats, and missing metadata.
+- **Curriculum Search (`POST /api/v1/knowledge/query`):** Executes semantic similarity matching and formats verifiable academic citations:
+  `"[Source Name], [Chapter], [Section], Page [X] ([Authority]) - License: [License]"`.
 
 ---
 

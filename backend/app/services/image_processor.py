@@ -178,3 +178,4 @@ class ImageProcessor:
 
 
 image_processor = ImageProcessor()
+

@@ -158,3 +158,4 @@ def test_unified_multimodal_endpoint(client: TestClient):
     assert "references" in data
     assert "processing_status" in data
     assert data["processing_status"] == "success"
+

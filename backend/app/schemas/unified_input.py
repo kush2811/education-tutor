@@ -53,3 +53,4 @@ class AudioTranscriptionResponse(BaseModel):
     confidence_score: float
     detected_language: str = "en"
     audio_file_name: str
+

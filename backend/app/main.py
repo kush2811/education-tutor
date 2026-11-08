@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import logger
+import app.models  # Ensure all ORM models are registered with Base
 from app.db.base import Base
 from app.db.session import engine
 from app.api.v1.router import api_router

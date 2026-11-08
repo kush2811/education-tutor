@@ -57,6 +57,16 @@ def client():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(scope="function")
+def db_session():
+    """Provide a direct database session for testing services."""
+    db = TestSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_file():
     """Clean up sqlite database file after full test session."""
