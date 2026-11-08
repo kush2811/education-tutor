@@ -4,7 +4,20 @@ export interface User {
   full_name: string;
   grade_level: string;
   is_active: boolean;
+  preferred_explanation_level?: string;
+  preferred_voice?: string;
+  preferred_playback_speed?: number;
+  preferred_language?: string;
+  preferred_subjects?: string;
   created_at: string;
+}
+
+export interface StudentPreferences {
+  preferred_explanation_level: 'beginner' | 'intermediate' | 'advanced';
+  preferred_voice: string;
+  preferred_playback_speed: number;
+  preferred_language: string;
+  preferred_subjects: string[];
 }
 
 export interface TokenResponse {

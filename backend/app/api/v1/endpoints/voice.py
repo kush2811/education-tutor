@@ -80,3 +80,4 @@ async def normalize_speech(request: NormalizeSpeechRequest):
         spoken_script=spoken_script,
         sentence_pairs=sentence_pairs
     )
+

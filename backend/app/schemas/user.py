@@ -10,6 +10,11 @@ class UserBase(BaseModel):
     email: EmailStr = Field(..., description="Student email address")
     full_name: Optional[str] = Field("Student Learner", description="Student's name")
     grade_level: Optional[str] = Field("Grade 10", description="Academic level")
+    preferred_explanation_level: Optional[str] = Field("intermediate", description="beginner, intermediate, advanced")
+    preferred_voice: Optional[str] = Field("en-US-AriaNeural", description="Neural voice identifier")
+    preferred_playback_speed: Optional[float] = Field(1.0, ge=0.5, le=3.0, description="Voice playback speed")
+    preferred_language: Optional[str] = Field("en", description="Preferred language code")
+    preferred_subjects: Optional[str] = Field("Mathematics,Physics,Computer Science", description="Comma-separated subjects")
 
 
 class UserCreate(UserBase):
@@ -21,6 +26,29 @@ class UserUpdate(BaseModel):
     """Schema for updating student profile."""
     full_name: Optional[str] = None
     grade_level: Optional[str] = None
+    preferred_explanation_level: Optional[str] = None
+    preferred_voice: Optional[str] = None
+    preferred_playback_speed: Optional[float] = None
+    preferred_language: Optional[str] = None
+    preferred_subjects: Optional[str] = None
+
+
+class StudentPreferences(BaseModel):
+    """Student personalization preferences."""
+    preferred_explanation_level: str = "intermediate"
+    preferred_voice: str = "en-US-AriaNeural"
+    preferred_playback_speed: float = 1.0
+    preferred_language: str = "en"
+    preferred_subjects: list[str] = ["Mathematics", "Physics", "Computer Science"]
+
+
+class StudentPreferencesUpdate(BaseModel):
+    """Payload to update student personalization preferences."""
+    preferred_explanation_level: Optional[str] = None
+    preferred_voice: Optional[str] = None
+    preferred_playback_speed: Optional[float] = None
+    preferred_language: Optional[str] = None
+    preferred_subjects: Optional[list[str]] = None
 
 
 class UserResponse(UserBase):

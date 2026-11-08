@@ -8,7 +8,14 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.session import StudySession, SessionMessage
 from app.models.asset import UploadedAsset
-from app.schemas.user import UserResponse, UserUpdate, DashboardStatsResponse, RecentSessionItem
+from app.schemas.user import (
+    UserResponse,
+    UserUpdate,
+    DashboardStatsResponse,
+    RecentSessionItem,
+    StudentPreferences,
+    StudentPreferencesUpdate
+)
 from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
@@ -39,9 +46,71 @@ def update_profile(
         current_user.full_name = payload.full_name
     if payload.grade_level is not None:
         current_user.grade_level = payload.grade_level
+    if payload.preferred_explanation_level is not None:
+        current_user.preferred_explanation_level = payload.preferred_explanation_level
+    if payload.preferred_voice is not None:
+        current_user.preferred_voice = payload.preferred_voice
+    if payload.preferred_playback_speed is not None:
+        current_user.preferred_playback_speed = payload.preferred_playback_speed
+    if payload.preferred_language is not None:
+        current_user.preferred_language = payload.preferred_language
+    if payload.preferred_subjects is not None:
+        current_user.preferred_subjects = payload.preferred_subjects
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.get(
+    "/preferences",
+    response_model=StudentPreferences,
+    summary="Get student personalization preferences"
+)
+def get_preferences(current_user: User = Depends(get_current_user)) -> StudentPreferences:
+    """Retrieve explanation depth, voice, playback speed, language, and subject preferences."""
+    subs = [s.strip() for s in current_user.preferred_subjects.split(",") if s.strip()]
+    return StudentPreferences(
+        preferred_explanation_level=current_user.preferred_explanation_level,
+        preferred_voice=current_user.preferred_voice,
+        preferred_playback_speed=current_user.preferred_playback_speed,
+        preferred_language=current_user.preferred_language,
+        preferred_subjects=subs
+    )
+
+
+@router.put(
+    "/preferences",
+    response_model=StudentPreferences,
+    summary="Update student personalization preferences"
+)
+def update_preferences(
+    payload: StudentPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> StudentPreferences:
+    """Update student's explanation level, voice, playback speed, language, and subjects."""
+    if payload.preferred_explanation_level is not None:
+        current_user.preferred_explanation_level = payload.preferred_explanation_level
+    if payload.preferred_voice is not None:
+        current_user.preferred_voice = payload.preferred_voice
+    if payload.preferred_playback_speed is not None:
+        current_user.preferred_playback_speed = payload.preferred_playback_speed
+    if payload.preferred_language is not None:
+        current_user.preferred_language = payload.preferred_language
+    if payload.preferred_subjects is not None:
+        current_user.preferred_subjects = ",".join(payload.preferred_subjects)
+
+    db.commit()
+    db.refresh(current_user)
+
+    subs = [s.strip() for s in current_user.preferred_subjects.split(",") if s.strip()]
+    return StudentPreferences(
+        preferred_explanation_level=current_user.preferred_explanation_level,
+        preferred_voice=current_user.preferred_voice,
+        preferred_playback_speed=current_user.preferred_playback_speed,
+        preferred_language=current_user.preferred_language,
+        preferred_subjects=subs
+    )
 
 
 @router.get(

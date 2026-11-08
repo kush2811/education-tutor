@@ -139,6 +139,18 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRenameSession = async (id: string, newTitle: string) => {
+    try {
+      const updated = await api.updateSession(id, { title: newTitle });
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: updated.title } : s)));
+      if (activeSession && activeSession.id === id) {
+        setActiveSession((prev) => (prev ? { ...prev, title: updated.title } : prev));
+      }
+    } catch (err) {
+      console.error('Failed to rename session:', err);
+    }
+  };
+
   const handleSendMessage = async (content: string, contentType = 'text') => {
     if (!activeSessionId) return;
     try {
@@ -272,6 +284,7 @@ export const App: React.FC = () => {
           activeSessionId={activeSessionId}
           onSelectSession={setActiveSessionId}
           onCreateSession={handleCreateSession}
+          onRenameSession={handleRenameSession}
           onDeleteSession={handleDeleteSession}
         />
 

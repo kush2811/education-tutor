@@ -135,7 +135,8 @@ ai-multimodal-tutor/
 │   │   │   ├── answer_consistency_checker.py # Question relevance, logic flow, SymPy arithmetic & AST code safety
 │   │   │   ├── answer_validator.py      # Master validation & hallucination control coordinator
 │   │   │   ├── speech_normalizer.py     # Educational speech normalizer: LaTeX math, code summaries, tables, headings
-│   │   │   └── voice_service.py         # Neural edge-tts voice synthesis & timestamped sentence/word aligner
+│   │   │   ├── voice_service.py         # Neural edge-tts voice synthesis & timestamped sentence/word aligner
+│   │   │   └── context_manager.py       # Conversation context management, anaphora & session isolation
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
@@ -145,7 +146,8 @@ ai-multimodal-tutor/
 │   │   ├── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
 │   │   ├── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
 │   │   ├── test_validation.py           # Phase 7 answer validation, citations, conflicts & consistency test suite
-│   │   └── test_voice.py                # Phase 8 TTS voice generation, subtitles & speech normalization test suite
+│   │   ├── test_voice.py                # Phase 8 TTS voice generation, subtitles & speech normalization test suite
+│   │   └── test_personalization.py      # Phase 9 conversation history, preferences & privacy test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -276,9 +278,53 @@ npm run build
 | **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed & Approved |
 | **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed & Approved |
 | **Phase 7** | **Answer Validation & Hallucination Control (Grounding, Citations, Consistency)** | ✅ Completed & Approved |
-| **Phase 8** | **Text-to-Speech and Synchronized Subtitles (Neural Voice, Word Alignment, Scrubber)** | ✅ Completed (Awaiting Phase 9 Approval) |
-| **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued for Next Phase |
-| **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+| **Phase 8** | **Text-to-Speech and Synchronized Subtitles (Neural Voice, Word Alignment, Scrubber)** | ✅ Completed & Approved |
+| **Phase 9** | **Conversation History, Personalization & Privacy Controls** | ✅ Completed (Awaiting Phase 10 Approval) |
+| **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued for Next Phase |
+
+---
+
+## 👤 Phase 9: Conversation History and Personalization
+
+Phase 9 establishes persistent, privacy-protected dialogue state and customizable learning profiles, enabling students to organize their academic exploration into distinct, renamed sessions with persistent multimodal message context.
+
+### 1. Conversation History & Session Management (`/api/v1/sessions/`)
+- **Full Session CRUD:** Create (`POST`), list (`GET`), detail view (`GET /{id}`), rename (`PUT /{id}`), and delete (`DELETE /{id}`) with automatic cascading message cleanup.
+- **Inline Renaming UI:** Students can rename study sessions inline from the left navigation sidebar with instant keyboard shortcuts (`Enter` to save, `Esc` to cancel).
+- **Session Isolation:** Dialogue history is strictly partitioned by `session_id`, preventing cross-topic contamination.
+
+### 2. Rich Multimodal Message Storage
+Every exchange persists full multimodal provenance within `SessionMessage`:
+- `sender_role`: `"user"`, `"assistant"`, or `"system"`.
+- `input_type`: Source media modality (`"text"`, `"image"`, `"audio"`, `"pdf"`, `"docx"`, `"video"`).
+- `extracted_question`: Normalized academic question extracted from multimodal OCR/STT.
+- `content`: Formatted student inquiry or Socratic tutor markdown response.
+- `citations_json`: Serialized bibliographic cards with textbook title, chapter, page number, and license.
+- `audio_url`: Canonical reference link to the synthesized TTS MP3 audio stream.
+- `created_at`: Exact timestamp of exchange.
+
+### 3. Student Personalization & Learning Preferences (`/api/v1/users/preferences`)
+Personalized configuration managed via dedicated endpoints (`GET` and `PUT` `/api/v1/users/preferences`):
+- **Explanation Rigor Level:**
+  - `beginner`: Intuitive real-world analogies, step-by-step guidance, foundational terms.
+  - `intermediate`: Standard curriculum rigor, standard notation, balanced algebra.
+  - `advanced`: Formal axiomatic definitions, rigorous proofs, asymptotic complexity analysis.
+- **Preferred AI Neural Voice:** Choice among `en-US-AriaNeural`, `en-US-GuyNeural`, `en-US-JennyNeural`, and `en-US-ChristopherNeural`.
+- **Default Playback Speed:** Adjustable speech rate presets (`0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`).
+- **Preferred Language:** Multilingual preference setting (`en`, `es`, `fr`, `de`, `hi`).
+- **Focus Academic Subjects:** Student-selected primary subjects (`Mathematics`, `Physics`, `Chemistry`, `Computer Science`, `Biology`).
+
+### 4. Context Management & Anaphoric Resolution (`ConversationContextManager`)
+- **Anaphoric Inquiry Detection:** Uses contextual regex analysis (`"that"`, `"it"`, `"the formula"`, `"why"`, `"step 2"`, `"repeat"`, `"what if x = 5"`) to detect student questions relying on prior turns.
+- **Targeted Context Extraction:** When an anaphoric follow-up is detected, extracts governing mathematical equations (`$$...$$`) and inquiry hypotheses from the immediate prior turn to guide the next response.
+- **Zero Cross-Session Bleed:** New sessions or unattached queries receive zero dialogue context from unrelated conversations.
+
+### 5. Multi-Tenant Privacy & Asset Protection
+- **Session Ownership Guard:** Sessions created by an authenticated user are assigned `user_id`. Requests by other users to view, rename, post messages to, or delete that session return `403 Forbidden`.
+- **Asset Privacy Guard:** Files uploaded to `/api/v1/ingest/upload` record `user_id`. Attempts by unauthorized students to inspect foreign files return `403 Forbidden`.
+- **Guest Namespace Isolation:** Unauthenticated visitors operate in an isolated guest namespace (`user_id = None`) without access to registered student records.
+
+---
 
 ---
 

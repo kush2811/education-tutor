@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.asset import UploadedAsset
+from app.models.user import User
+from app.api.v1.endpoints.auth import get_current_user_optional
 from app.core.logging import logger
 from app.core.file_security import (
     validate_file_security,
@@ -338,9 +340,10 @@ async def process_unified_file(
 async def upload_file(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ) -> FileUploadResponse:
-    """Store an uploaded asset locally and record metadata in database."""
+    """Store an uploaded asset locally and record metadata in database with user ownership."""
     file_bytes = await file.read()
     category, ext, safe_name = validate_file_security(
         filename=file.filename or "uploaded_file",
@@ -352,7 +355,10 @@ async def upload_file(
     with open(dest_path, "wb") as f:
         f.write(file_bytes)
 
+    user_id = current_user.id if current_user else None
+
     new_asset = UploadedAsset(
+        user_id=user_id,
         session_id=session_id,
         file_name=file.filename or safe_name,
         file_type=category,
@@ -379,12 +385,25 @@ async def upload_file(
     response_model=AssetResponse,
     summary="Get uploaded file metadata"
 )
-def get_asset(asset_id: str, db: Session = Depends(get_db)) -> AssetResponse:
-    """Retrieve metadata for a recorded asset."""
+def get_asset(
+    asset_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+) -> AssetResponse:
+    """Retrieve metadata for a recorded asset with privacy ownership check."""
     asset = db.query(UploadedAsset).filter(UploadedAsset.id == asset_id).first()
     if not asset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Asset '{asset_id}' not found."
         )
+
+    # Privacy Check: User cannot access another user's asset
+    if asset.user_id:
+        if not current_user or current_user.id != asset.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this private asset."
+            )
+
     return asset

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, BookOpen, Trash2, Clock } from 'lucide-react';
+import { Plus, BookOpen, Trash2, Clock, Edit2, Check, X } from 'lucide-react';
 import { StudySession } from '../types';
 
 interface SessionListProps {
@@ -7,6 +7,7 @@ interface SessionListProps {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onCreateSession: (title: string, subject: string) => void;
+  onRenameSession?: (id: string, newTitle: string) => void;
   onDeleteSession: (id: string) => void;
 }
 
@@ -15,11 +16,16 @@ export const SessionList: React.FC<SessionListProps> = ({
   activeSessionId,
   onSelectSession,
   onCreateSession,
+  onRenameSession,
   onDeleteSession,
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newSubject, setNewSubject] = useState('Mathematics');
+
+  // Inline rename state
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +33,25 @@ export const SessionList: React.FC<SessionListProps> = ({
     onCreateSession(newTitle.trim(), newSubject);
     setNewTitle('');
     setShowModal(false);
+  };
+
+  const startRename = (session: StudySession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(session.id);
+    setEditingTitle(session.title);
+  };
+
+  const handleSaveRename = (sessionId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (editingTitle.trim() && onRenameSession) {
+      onRenameSession(sessionId, editingTitle.trim());
+    }
+    setEditingSessionId(null);
+  };
+
+  const cancelRename = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSessionId(null);
   };
 
   return (
@@ -53,6 +78,8 @@ export const SessionList: React.FC<SessionListProps> = ({
         ) : (
           sessions.map((session) => {
             const isActive = session.id === activeSessionId;
+            const isEditing = session.id === editingSessionId;
+
             return (
               <div
                 key={session.id}
@@ -63,34 +90,79 @@ export const SessionList: React.FC<SessionListProps> = ({
                     : 'hover:bg-slate-50 text-slate-700 border border-transparent'
                 }`}
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 mr-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                       {session.subject}
                     </span>
                   </div>
-                  <h3 className="font-medium text-sm truncate mt-1 text-slate-800">
-                    {session.title}
-                  </h3>
+
+                  {isEditing ? (
+                    <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename(session.id);
+                          if (e.key === 'Escape') cancelRename();
+                        }}
+                        autoFocus
+                        className="w-full text-xs font-medium px-2 py-1 border border-sky-400 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                      <button
+                        onClick={(e) => handleSaveRename(session.id, e)}
+                        className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                        title="Save"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => cancelRename(e)}
+                        className="p-1 text-slate-400 hover:bg-slate-100 rounded"
+                        title="Cancel"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <h3 className="font-medium text-sm truncate mt-1 text-slate-800">
+                      {session.title}
+                    </h3>
+                  )}
+
                   <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
                     <Clock className="w-3 h-3" />
                     <span>{new Date(session.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    <span>• {session.messages?.length || 0} messages</span>
+                    <span>• {session.messages?.length || 0} msgs</span>
                   </div>
                 </div>
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm('Are you sure you want to delete this study session?')) {
-                      onDeleteSession(session.id);
-                    }
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-all"
-                  title="Delete Session"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {!isEditing && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onRenameSession && (
+                      <button
+                        onClick={(e) => startRename(session, e)}
+                        className="p-1.5 hover:bg-sky-100 text-slate-400 hover:text-sky-700 rounded-lg transition-colors"
+                        title="Rename Session"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('Are you sure you want to delete this study session?')) {
+                          onDeleteSession(session.id);
+                        }
+                      }}
+                      className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                      title="Delete Session"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })

@@ -45,6 +45,23 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Dependency to extract authenticated user if Bearer token is provided, otherwise returns None."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        token = authorization.split(" ")[1]
+        payload = decode_access_token(token)
+        if not payload or "sub" not in payload:
+            return None
+        return db.execute(select(User).where(User.id == payload["sub"])).scalar_one_or_none()
+    except Exception:
+        return None
+
+
 @router.post(
     "/register",
     response_model=UserResponse,

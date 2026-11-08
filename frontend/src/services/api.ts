@@ -153,6 +153,48 @@ export const api = {
     }
   },
 
+  async updateSession(
+    sessionId: string,
+    data: { title?: string; subject?: string; status?: string }
+  ): Promise<StudySession> {
+    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update session');
+    }
+    return res.json();
+  },
+
+  // --- Student Preferences ---
+  async getPreferences(): Promise<import('../types').StudentPreferences> {
+    const res = await fetch(`${API_BASE_URL}/users/preferences`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error('Failed to load student preferences');
+    }
+    return res.json();
+  },
+
+  async updatePreferences(
+    data: Partial<import('../types').StudentPreferences>
+  ): Promise<import('../types').StudentPreferences> {
+    const res = await fetch(`${API_BASE_URL}/users/preferences`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update student preferences');
+    }
+    return res.json();
+  },
+
   // --- File Uploads ---
   async uploadFile(file: File, sessionId?: string): Promise<UploadedFileResponse> {
     const formData = new FormData();

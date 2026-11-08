@@ -1,6 +1,7 @@
 """Master educational tutor reasoning engine: problem decomposition, explanation levels, and multi-turn session memory."""
 
 import re
+import json
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from app.models.session import StudySession, SessionMessage
 from app.services.sympy_solver import sympy_solver
 from app.services.rag_service import rag_service
 from app.services.answer_validator import answer_validator
+from app.services.context_manager import context_manager
 from app.schemas.rag import RAGQueryRequest
 from app.schemas.validation import AnswerValidationRequest
 from app.core.config import settings
@@ -44,17 +46,12 @@ class EducationalTutorEngine:
         level_str = request.level.value if hasattr(request.level, 'value') else str(request.level)
 
         # 1. Fetch Conversation Context if session_id is active
-        history_context = []
-        if request.session_id:
-            recent_msgs = (
-                db.query(SessionMessage)
-                .filter(SessionMessage.session_id == request.session_id)
-                .order_by(SessionMessage.created_at.asc())
-                .limit(6)
-                .all()
-            )
-            for m in recent_msgs:
-                history_context.append(f"{m.sender_role.upper()}: {m.content}")
+        turns, is_follow_up, prior_context = context_manager.extract_relevant_context(
+            session_id=request.session_id,
+            current_query=query,
+            db=db
+        )
+        history_context = [f"{t['role'].upper()}: {t['content']}" for t in turns]
 
         # 2. Check if problem contains mathematical equations for SymPy verification
         has_math_eq = bool(re.search(r'(=|x\^|\bderivative\b|\bintegral\b|\blimit\b|\bfactor\b)', query, re.IGNORECASE))
@@ -223,12 +220,14 @@ class EducationalTutorEngine:
             db.add(session)
             db.commit()
 
-        # Save student message
+        # Save student message with input_type and extracted_question
         user_msg = SessionMessage(
             session_id=session.id,
             sender_role="user",
             content_type="text",
-            content=request.message
+            content=request.message,
+            input_type="text",
+            extracted_question=request.message
         )
         db.add(user_msg)
         db.commit()
@@ -242,12 +241,15 @@ class EducationalTutorEngine:
         )
         solved = self.solve_problem(solve_req, db=db)
 
-        # Save tutor assistant response
+        # Save tutor assistant response with citations and metadata
         assistant_msg = SessionMessage(
             session_id=session.id,
             sender_role="assistant",
             content_type="text",
-            content=solved.formatted_markdown
+            content=solved.formatted_markdown,
+            input_type="text",
+            extracted_question=request.message,
+            citations_json=json.dumps([c.model_dump() for c in solved.citations]) if solved.citations else None
         )
         db.add(assistant_msg)
         db.commit()

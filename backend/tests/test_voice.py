@@ -197,3 +197,4 @@ def test_voice_api_endpoints():
     # Nonexistent hash
     bad_res2 = client.get("/api/v1/voice/audio/00000000000000000000000000000000.mp3")
     assert bad_res2.status_code == 404
+

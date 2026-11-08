@@ -39,7 +39,11 @@ class SessionMessage(Base):
     sender_role: Mapped[str] = mapped_column(String(20))  # "user", "assistant", "system"
     content_type: Mapped[str] = mapped_column(String(20), default="text")  # "text", "image", "audio", "multimodal"
     content: Mapped[str] = mapped_column(Text)
-    metadata_json: Mapped[str] = mapped_column(Text, nullable=True)  # JSON metadata for hints, formulas, audio urls
+    input_type: Mapped[str] = mapped_column(String(30), default="text")  # text, image, audio, pdf, docx, video
+    extracted_question: Mapped[str] = mapped_column(Text, nullable=True)  # Normalized inquiry statement
+    audio_url: Mapped[str] = mapped_column(String(512), nullable=True)  # Synthesized TTS audio link
+    citations_json: Mapped[str] = mapped_column(Text, nullable=True)  # Serialized bibliographic citations
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=True)  # JSON metadata for validation, scores, etc.
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped["StudySession"] = relationship("StudySession", back_populates="messages")
