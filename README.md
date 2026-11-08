@@ -73,7 +73,8 @@ ai-multimodal-tutor/
 │   │   │       │   ├── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
 │   │   │       │   ├── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
 │   │   │       │   ├── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
-│   │   │       │   └── tutor.py         # AI Tutor endpoints: /solve, /math, /code, /study-aid, /practice, /chat
+│   │   │       │   ├── tutor.py         # AI Tutor endpoints: /solve, /math, /code, /study-aid, /practice, /chat
+│   │   │       │   └── validation.py    # Answer validation & hallucination control: /validate-answer, /check-citations
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
@@ -97,7 +98,8 @@ ai-multimodal-tutor/
 │   │   │   ├── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
 │   │   │   ├── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
 │   │   │   ├── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
-│   │   │   └── tutor.py                 # Pydantic models for problem solving, math, code, study aids & practice
+│   │   │   ├── tutor.py                 # Pydantic models for problem solving, math, code, study aids & practice
+│   │   │   └── validation.py            # Grounding status, citation audits, source conflicts & consistency schemas
 │   │   ├── services/
 │   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
 │   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
@@ -124,7 +126,12 @@ ai-multimodal-tutor/
 │   │   │   ├── code_assistant.py        # Safe static AST code analysis, complexity evaluation, debugging
 │   │   │   ├── study_aid_generator.py   # Chapter summaries, key takeaways, definitions, revision notes
 │   │   │   ├── practice_generator.py    # Bloom's taxonomy MCQs with distractor rationales & worked problems
-│   │   │   └── tutor_engine.py          # Master pedagogical tutor coordinator: decomposition, levels, Socratic feedback
+│   │   │   ├── tutor_engine.py          # Master pedagogical tutor coordinator: decomposition, levels, Socratic feedback
+│   │   │   ├── citation_validator.py    # Citation audit: existence, document match, valid page & canonical URLs
+│   │   │   ├── source_grounding_checker.py # Factual assertion grounding & insufficient context detector
+│   │   │   ├── source_conflict_detector.py # Academic convention & duality contradiction resolver (Authority hierarchy)
+│   │   │   ├── answer_consistency_checker.py # Question relevance, logic flow, SymPy arithmetic & AST code safety
+│   │   │   └── answer_validator.py      # Master validation & hallucination control coordinator
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
@@ -132,7 +139,8 @@ ai-multimodal-tutor/
 │   │   ├── test_multimodal.py           # Comprehensive multimodal ingestion test suite
 │   │   ├── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
 │   │   ├── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
-│   │   └── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
+│   │   ├── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
+│   │   └── test_validation.py           # Phase 7 answer validation, citations, conflicts & consistency test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -261,11 +269,71 @@ npm run build
 | **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed & Approved |
 | **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed & Approved |
 | **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed & Approved |
-| **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed (Awaiting Phase 7 Approval) |
-| **Phase 7** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued for Next Phase |
-| **Phase 8** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
+| **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed & Approved |
+| **Phase 7** | **Answer Validation & Hallucination Control (Grounding, Citations, Consistency)** | ✅ Completed (Awaiting Phase 8 Approval) |
+| **Phase 8** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued for Next Phase |
 | **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
 | **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 🛡️ Phase 7: Answer Validation & Hallucination Control
+
+The validation layer operates as an automated intermediary gatekeeper positioned directly between AI answer generation and final student output. It rigorously verifies source grounding, enforces citation integrity, prevents hallucination on unindexed topics, resolves curriculum conflicts via authoritative hierarchy, and ensures mathematical and programming consistency.
+
+### 1. Intermediary Validation Architecture (`/api/v1/validation/`)
+- Intercepts answers generated by both the RAG pipeline (`rag_service`) and the pedagogical problem solver (`tutor_engine`).
+- Audits and sanitizes output before returning responses to the student interface.
+- Appends transparent, readable verification badges and audit notices to answers whenever discrepancies or unverified statements are detected.
+
+### 2. Source-Grounding Verification (`SourceGroundingChecker`)
+- Deconstructs answers into testable factual claims.
+- Evaluates token and entity overlap against retrieved curriculum excerpts.
+- Determines the exact supporting chunk and authoring body for every factual assertion.
+
+### 3. Citation Integrity Audit (`CitationValidator`)
+- **Phantom Index Detection:** Detects and flags citation markers (e.g. `[99]`) that do not exist in the retrieved curriculum context, rewriting them to `[N (Unverified Citation)]`.
+- **Document & Page Matching:** Verifies that citations correspond to the actual retrieved source document and possess non-negative, valid page numbers.
+- **URL Canonicalization:** Validates that bibliographic links are syntactically valid and point to approved educational domains.
+
+### 4. Insufficient Information Handling
+- The system never fabricates an answer when knowledge base coverage is missing or when retrieval confidence is below threshold.
+- Automatically detects low-confidence retrieval (< 0.25) or ungrounded queries and returns a transparent disclosure:
+  *"The educational knowledge base currently contains no verified curriculum materials matching this inquiry. The system will not generate unverified claims without authoritative curriculum grounding."*
+
+### 5. Source Conflict Detection & Authority Tiering (`SourceConflictDetector`)
+- Automatically detects scientific dualities and conflicting conventions among retrieved chunks (e.g. Thermodynamics First Law sign conventions $\Delta U = Q \pm W$, inclusion of zero in natural numbers $\mathbb{N}$, and standard gravitational acceleration approximations $g$).
+- Implements the Phase 4 **Curriculum Authority Hierarchy**:
+  1. **Tier 1 (Weight 100):** National Curriculum Bodies (NCERT).
+  2. **Tier 2 (Weight 90):** Government Portals (ePathshala, NPTEL IIT Madras).
+  3. **Tier 3 (Weight 80):** Official University Materials (OpenStax, MIT OpenCourseWare).
+  4. **Tier 4 (Weight 70):** Official Documentation & Verified OER (Python PSF, LibreTexts).
+  5. **Tier 5 (Weight 65):** Academic Preprints (arXiv).
+- Resolves conflicts in favor of higher-tier authorities; if authorities are of equal tier, presents both conventions explicitly to the student.
+
+### 6. Answer Consistency & Safety (`AnswerConsistencyChecker`)
+- **Question Relevance:** Verifies that the answer substantively addresses the student's inquiry, catching off-topic or evasive responses.
+- **Logical Flow:** Checks sequential continuity across step-by-step problem breakdowns.
+- **Mathematical Consistency via SymPy:** Extracts arithmetic and algebraic equivalence claims (e.g. equations, deduction steps) and tests equality using symbolic simplification, intercepting erroneous calculations before presentation.
+- **Programming Safety via AST:** Parses code blocks using Python `ast` to detect syntax errors, scans for disallowed system calls (`os.system`, `subprocess`, `rm -rf`, `eval`, `exec`), and flags unbounded while-loops.
+
+### 7. Confidence & Transparency
+- Rejects pseudo-scientific arbitrary confidence percentages (e.g. "98.7% accurate").
+- Classifies responses into three transparent, pedagogically grounded verification tiers:
+  - `SUPPORTED_BY_SOURCES`: Factual assertions are directly anchored in verified curriculum excerpts with valid citations.
+  - `GENERAL_MODEL_KNOWLEDGE`: Conceptually and mathematically consistent explanation from foundation model reasoning, without specific indexed curriculum chunks.
+  - `INSUFFICIENTLY_VERIFIED`: Unverified assertions, missing curriculum evidence, math discrepancies, or code safety violations flagged.
+
+### 8. Limitations of Automated Verification
+- Automated symbolic checking verifies deterministic algebraic equalities and arithmetic, but does not construct arbitrary higher-order formal proofs.
+- Static AST inspection validates syntax and identifies known hazardous execution patterns, but cannot simulate dynamic runtime behavior or non-Python code blocks.
+- Lexical and semantic overlap approximates source grounding, but does not replace domain-expert educator review.
+
+### 9. Endpoints
+- `POST /api/v1/validation/validate-answer`: Full end-to-end answer audit (citations, grounding, conflicts, consistency).
+- `POST /api/v1/validation/check-citations`: Standalone citation marker, URL, and page validation.
+- `POST /api/v1/validation/check-conflicts`: Standalone contradiction detection across retrieved curriculum chunks.
+- `POST /api/v1/validation/check-consistency`: Standalone question relevance, SymPy math, and AST code safety checks.
 
 ---
 

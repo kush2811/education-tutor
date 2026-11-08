@@ -196,3 +196,4 @@ class SafeCodeAssistant:
 
 
 safe_code_assistant = SafeCodeAssistant()
+

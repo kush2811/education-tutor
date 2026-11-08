@@ -227,3 +227,4 @@ class EducationalPracticeGenerator:
 
 
 practice_generator = EducationalPracticeGenerator()
+

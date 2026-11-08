@@ -252,3 +252,4 @@ def test_tutor_api_endpoints(client, db_session: Session):
     })
     assert res_chat.status_code == 200
     assert "api-session-test" == res_chat.json()["session_id"]
+

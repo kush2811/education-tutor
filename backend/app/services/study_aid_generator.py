@@ -146,3 +146,4 @@ class EducationalStudyAidGenerator:
 
 
 study_aid_generator = EducationalStudyAidGenerator()
+

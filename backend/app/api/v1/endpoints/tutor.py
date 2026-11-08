@@ -156,3 +156,4 @@ def chat_with_tutor(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Tutor chat failed: {str(e)}"
         )
+

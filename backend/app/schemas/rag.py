@@ -41,6 +41,7 @@ class RAGResponse(BaseModel):
     retrieved_chunks_count: int
     processing_time_ms: float
     intent: str
+    validation: Optional[Dict[str, Any]] = Field(default=None, description="Phase 7 answer validation and hallucination audit")
 
 
 class RetrievedChunkItem(BaseModel):

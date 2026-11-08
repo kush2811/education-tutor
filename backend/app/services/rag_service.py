@@ -5,10 +5,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.schemas.rag import RAGQueryRequest, RAGResponse, RetrievalDiagnosticResponse
+from app.schemas.validation import AnswerValidationRequest
 from app.services.query_processor import query_processor
 from app.services.rag_retriever import rag_retriever
 from app.services.context_builder import context_builder
 from app.services.answer_generator import answer_generator
+from app.services.answer_validator import answer_validator
 
 
 class EducationalRAGService:
@@ -53,17 +55,28 @@ class EducationalRAGService:
             subject=inferred_subject
         )
 
+        # 5. Phase 7 Validation Layer Interceptor
+        val_req = AnswerValidationRequest(
+            question=normalized_q,
+            answer=answer_text,
+            retrieved_chunks=retrieved_chunks,
+            citations=verified_citations,
+            subject=inferred_subject
+        )
+        val_res = answer_validator.validate_answer(val_req)
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         return RAGResponse(
             query=normalized_q,
-            answer=answer_text,
+            answer=val_res.sanitized_answer,
             subject_domain=inferred_subject,
             is_context_sufficient=is_sufficient,
             citations=verified_citations,
             retrieved_chunks_count=len(retrieved_chunks),
             processing_time_ms=round(elapsed_ms, 2),
-            intent=intent
+            intent=intent,
+            validation=val_res.model_dump()
         )
 
     def retrieve_diagnostics(self, request: RAGQueryRequest, db: Session) -> RetrievalDiagnosticResponse:

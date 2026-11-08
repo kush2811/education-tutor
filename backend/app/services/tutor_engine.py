@@ -15,7 +15,9 @@ from app.schemas.tutor import (
 from app.models.session import StudySession, SessionMessage
 from app.services.sympy_solver import sympy_solver
 from app.services.rag_service import rag_service
+from app.services.answer_validator import answer_validator
 from app.schemas.rag import RAGQueryRequest
+from app.schemas.validation import AnswerValidationRequest
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -178,6 +180,16 @@ class EducationalTutorEngine:
 
         formatted_md = "\n".join(md_lines)
 
+        # 5. Phase 7 Validation Layer Interceptor
+        val_req = AnswerValidationRequest(
+            question=query,
+            answer=formatted_md,
+            retrieved_chunks=[],
+            citations=rag_citations,
+            subject=request.subject
+        )
+        val_res = answer_validator.validate_answer(val_req)
+
         return TutorProblemSolveResponse(
             problem_understanding=understanding,
             given_information=["Inquiry: " + query],
@@ -188,9 +200,10 @@ class EducationalTutorEngine:
             sympy_verified=sympy_verified,
             sympy_details=sympy_data,
             level=level_str,
-            formatted_markdown=formatted_md,
+            formatted_markdown=val_res.sanitized_answer,
             citations=rag_citations,
-            conversation_context_used=bool(history_context)
+            conversation_context_used=bool(history_context),
+            validation=val_res.model_dump()
         )
 
     def chat_turn(
@@ -246,8 +259,10 @@ class EducationalTutorEngine:
             response_text=solved.formatted_markdown,
             level=solved.level,
             sympy_verified=solved.sympy_verified,
-            citations=solved.citations
+            citations=solved.citations,
+            validation=solved.validation
         )
 
 
 tutor_engine = EducationalTutorEngine()
+

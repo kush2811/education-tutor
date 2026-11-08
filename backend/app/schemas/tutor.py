@@ -44,6 +44,7 @@ class TutorProblemSolveResponse(BaseModel):
     formatted_markdown: str = Field(..., description="Ready-to-render Markdown matching frontend TutorResponse component")
     citations: List[RAGCitation] = Field(default_factory=list)
     conversation_context_used: bool = False
+    validation: Optional[Dict[str, Any]] = Field(default=None, description="Answer validation and grounding audit")
 
 
 class MathSolveRequest(BaseModel):
@@ -170,3 +171,5 @@ class TutorChatResponse(BaseModel):
     level: str
     sympy_verified: bool
     citations: List[RAGCitation] = Field(default_factory=list)
+    validation: Optional[Dict[str, Any]] = Field(default=None, description="Answer validation and grounding audit")
+
