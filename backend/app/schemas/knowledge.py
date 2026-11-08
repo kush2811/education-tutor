@@ -147,3 +147,4 @@ class KnowledgeQueryResponse(BaseModel):
     query: str
     total_matches: int
     results: List[KnowledgeQueryResultItem]
+

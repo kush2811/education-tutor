@@ -103,3 +103,4 @@ class QualityReport(Base):
     status = Column(String(30), nullable=False)  # passed, flagged_warnings, failed
     details_json = Column(JSON, default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

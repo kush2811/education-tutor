@@ -275,3 +275,4 @@ def list_quality_reports(
     if status_filter:
         query = query.filter(QualityReport.status == status_filter)
     return query.order_by(QualityReport.created_at.desc()).limit(100).all()
+

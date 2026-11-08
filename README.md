@@ -71,7 +71,8 @@ ai-multimodal-tutor/
 │   │   │       │   ├── health.py        # System health & DB readiness endpoint
 │   │   │       │   ├── session.py       # Tutoring session & message CRUD (Conversations)
 │   │   │       │   ├── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
-│   │   │       │   └── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
+│   │   │       │   ├── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
+│   │   │       │   └── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
@@ -93,7 +94,8 @@ ai-multimodal-tutor/
 │   │   │   ├── session.py               # Session & Message request/response schemas
 │   │   │   ├── asset.py                 # Uploaded file schemas
 │   │   │   ├── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
-│   │   │   └── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
+│   │   │   ├── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
+│   │   │   └── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
 │   │   ├── services/
 │   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
 │   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
@@ -109,13 +111,20 @@ ai-multimodal-tutor/
 │   │   │   ├── embedding_service.py     # Gemini text-embedding-004 + 768-dim local projection
 │   │   │   ├── vector_store.py          # Persistent ChromaDB vector store collection manager
 │   │   │   ├── data_quality.py          # Validation auditing for missing text & duplicate chunks
-│   │   │   └── knowledge_manager.py     # Knowledge lifecycle, duplicate detection, versioning
+│   │   │   ├── knowledge_manager.py     # Knowledge lifecycle, duplicate detection, versioning
+│   │   │   ├── query_processor.py       # Query normalization, domain classification, and expansion
+│   │   │   ├── rag_retriever.py         # Hybrid retrieval (ChromaDB Dense + BM25 Sparse) & RRF reranking
+│   │   │   ├── context_builder.py       # Reference cards and citation metadata mapping
+│   │   │   ├── answer_generator.py      # Grounded LLM answering with anti-hallucination guardrails
+│   │   │   ├── rag_service.py           # Master 5-stage RAG coordinator & latency tracker
+│   │   │   └── rag_evaluator.py         # Benchmark evaluator measuring recall@k, precision, and latency
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
 │   │   ├── test_api.py                  # Health, Auth, Session & Upload test suite
 │   │   ├── test_multimodal.py           # Comprehensive multimodal ingestion test suite
-│   │   └── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
+│   │   ├── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
+│   │   └── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -248,13 +257,32 @@ npm run build
 | **Phase 1** | **Project Setup & Foundation (FastAPI, SQLite, React, Vite, Tailwind)** | ✅ Completed & Approved |
 | **Phase 2** | **Student Interface & Authentication (Dashboard, Socratic Chat, Voice Dock)** | ✅ Completed & Approved |
 | **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed & Approved |
-| **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed (Awaiting Approval) |
-| **Phase 5** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Next Phase |
-| **Phase 6** | **Knowledge Retrieval & Verifiable RAG System (Cross-Encoder Reranking & Citations)**| ⏳ Queued |
+| **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed & Approved |
+| **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed (Awaiting Approval) |
+| **Phase 6** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Next Phase |
 | **Phase 7** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued |
 | **Phase 8** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
 | **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
 | **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 🧠 Phase 5: Retrieval-Augmented Generation (RAG) Pipeline
+
+The RAG pipeline grounds student tutoring answers strictly in verified educational curricula, enforcing verifiable citations and proactive uncertainty communication.
+
+### 1. Multi-Stage RAG Architecture (`/api/v1/rag/`)
+- **Stage 1 (Query Processing):** Standardizes bracket LaTeX expressions, classifies query intent (`definition`, `formula_lookup`, `step_by_step_solution`, `conceptual_explanation`), identifies STEM subject domain, and enriches queries via educational synonym expansion.
+- **Stage 2 (Hybrid Retrieval):** Dual-engine search combining **ChromaDB Dense Semantic Search** (768-dim cosine similarity) and **Okapi BM25 Sparse Lexical Search** across indexed curriculum chunks.
+- **Stage 3 (Reciprocal Rank Fusion & Reranking):** Merges candidate lists using RRF ($RRF(d) = \sum \frac{1}{60 + rank(d)}$) and applies cross-feature reranking with structural heading affinity and formula alignment bonuses.
+- **Stage 4 (Context Construction):** Assembles structured reference cards with source titles, chapters, sections, exact page numbers, and canonical URLs.
+- **Stage 5 (Grounded Synthesis & Citations):** Instructs the LLM (Gemini 1.5 Flash with deterministic local fallback) to answer strictly from reference cards using numbered footnote citations (`[1]`, `[2]`), without fabricating sources or facts.
+- **Uncertainty Communication Guardrail:** When curriculum materials do not contain sufficient context, the pipeline detects the low confidence score and returns a transparent uncertainty response, preventing hallucinated answers on unindexed topics.
+
+### 2. Endpoints
+- `POST /api/v1/rag/query`: Primary student inquiry endpoint returning grounded explanation with verified citations.
+- `POST /api/v1/rag/retrieve`: Standalone diagnostic retrieval endpoint for inspecting dense, BM25, and rerank scores.
+- `POST /api/v1/rag/evaluate`: Automated benchmarking endpoint evaluating recall@k, citation validity, uncertainty accuracy, and latency.
 
 ---
 

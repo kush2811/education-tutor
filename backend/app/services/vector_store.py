@@ -141,3 +141,4 @@ class ChromaVectorStore:
 
 
 vector_store = ChromaVectorStore()
+

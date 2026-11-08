@@ -431,3 +431,4 @@ def test_knowledge_api_endpoints(client):
     assert res_reports.status_code == 200
     reports = res_reports.json()
     assert len(reports) >= 1
+

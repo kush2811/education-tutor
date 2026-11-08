@@ -397,3 +397,4 @@ class KnowledgeBaseManager:
 
 
 knowledge_manager = KnowledgeBaseManager()
+

@@ -231,3 +231,4 @@ def validate_source_license_compliance(
         "reasons": reasons,
         "license_verified": is_license_ok,
     }
+
