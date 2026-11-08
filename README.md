@@ -72,7 +72,8 @@ ai-multimodal-tutor/
 │   │   │       │   ├── session.py       # Tutoring session & message CRUD (Conversations)
 │   │   │       │   ├── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
 │   │   │       │   ├── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
-│   │   │       │   └── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
+│   │   │       │   ├── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
+│   │   │       │   └── tutor.py         # AI Tutor endpoints: /solve, /math, /code, /study-aid, /practice, /chat
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
@@ -95,7 +96,8 @@ ai-multimodal-tutor/
 │   │   │   ├── asset.py                 # Uploaded file schemas
 │   │   │   ├── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
 │   │   │   ├── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
-│   │   │   └── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
+│   │   │   ├── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
+│   │   │   └── tutor.py                 # Pydantic models for problem solving, math, code, study aids & practice
 │   │   ├── services/
 │   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
 │   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
@@ -117,14 +119,20 @@ ai-multimodal-tutor/
 │   │   │   ├── context_builder.py       # Reference cards and citation metadata mapping
 │   │   │   ├── answer_generator.py      # Grounded LLM answering with anti-hallucination guardrails
 │   │   │   ├── rag_service.py           # Master 5-stage RAG coordinator & latency tracker
-│   │   │   └── rag_evaluator.py         # Benchmark evaluator measuring recall@k, precision, and latency
+│   │   │   ├── rag_evaluator.py         # Benchmark evaluator measuring recall@k, precision, and latency
+│   │   │   ├── sympy_solver.py          # Symbolic mathematics engine: arithmetic, algebra, calculus, statistics
+│   │   │   ├── code_assistant.py        # Safe static AST code analysis, complexity evaluation, debugging
+│   │   │   ├── study_aid_generator.py   # Chapter summaries, key takeaways, definitions, revision notes
+│   │   │   ├── practice_generator.py    # Bloom's taxonomy MCQs with distractor rationales & worked problems
+│   │   │   └── tutor_engine.py          # Master pedagogical tutor coordinator: decomposition, levels, Socratic feedback
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
 │   │   ├── conftest.py                  # Pytest fixtures & test client
 │   │   ├── test_api.py                  # Health, Auth, Session & Upload test suite
 │   │   ├── test_multimodal.py           # Comprehensive multimodal ingestion test suite
 │   │   ├── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
-│   │   └── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
+│   │   ├── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
+│   │   └── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -160,12 +168,6 @@ ai-multimodal-tutor/
 │   ├── tsconfig.json                    # TypeScript compiler options
 │   ├── tailwind.config.js               # Tailwind styling configuration
 │   └── .env.example                     # Frontend environment template
-├── scripts/
-│   ├── run_backend.ps1                  # PowerShell script to start FastAPI backend
-│   └── run_frontend.ps1                 # PowerShell script to start Vite frontend
-├── .env.example                         # Master environment variables template
-├── .gitignore                           # Git ignore rules for Python, Node, DB & secrets
-└── README.md                            # Comprehensive technical documentation
 ├── scripts/
 │   ├── run_backend.ps1                  # PowerShell script to start FastAPI backend
 │   └── run_frontend.ps1                 # PowerShell script to start Vite frontend
@@ -258,12 +260,66 @@ npm run build
 | **Phase 2** | **Student Interface & Authentication (Dashboard, Socratic Chat, Voice Dock)** | ✅ Completed & Approved |
 | **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed & Approved |
 | **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed & Approved |
-| **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed (Awaiting Approval) |
-| **Phase 6** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Next Phase |
-| **Phase 7** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued |
+| **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed & Approved |
+| **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed (Awaiting Phase 7 Approval) |
+| **Phase 7** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued for Next Phase |
 | **Phase 8** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
 | **Phase 9** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
 | **Phase 10** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 🎓 Phase 6: AI Tutor & Educational Problem Solver
+
+The AI Tutor transforms the platform from a generic chatbot into an active, verified pedagogical tutor. It integrates symbolic mathematical verification, safe static code analysis, cognitive study aid generation, Bloom's taxonomy practice question synthesis, and multi-turn conversational context.
+
+### 1. Pedagogical Problem Decomposition (`/api/v1/tutor/solve`)
+Every STEM explanation is structured according to a strict educational scaffold:
+- **Problem Understanding:** Clarifying the core question and physics/math fundamentals in plain terms.
+- **Given Information:** Explicitly cataloging all provided variables, quantities, and boundary conditions.
+- **Required Result:** Identifying the exact target unknown or proof goal.
+- **Step-by-Step Solution:** Numbered procedural sequence where each step features a pedagogical title, detailed explanation, mathematical formulas in KaTeX, and rationale.
+- **Final Answer:** Clean, verified result highlighted for the student.
+- **Why It Works:** Explaining the underlying intuition, physical laws, or mathematical theorems ensuring deep conceptual transfer.
+
+### 2. Multi-Tier Explanation Levels
+The tutor adapts its tone, rigor, and depth across three distinct learning tiers:
+- `beginner`: Uses intuitive real-world analogies, minimizes heavy mathematical jargon, and guides step-by-step.
+- `intermediate`: Standard high-school and undergraduate curriculum depth, balancing equations, standard theorems, and structured derivations.
+- `advanced`: Rigorous university-level exposition incorporating formal axiomatic proofs, asymptotic behavior, domain restrictions, and structural constraints.
+
+### 3. Symbolic Mathematics Engine (`SymPySolver`, `/api/v1/tutor/math`)
+To guarantee exact mathematical precision without LLM hallucination, the backend employs **SymPy 1.14**:
+- **Arithmetic:** Exact rational arithmetic ($\frac{a}{b}$) preventing floating-point imprecision.
+- **Algebra:** Symbolic polynomial factorization, quadratic formula derivations, and multi-variable equation solving.
+- **Calculus:** Symbolic derivatives ($\frac{d}{dx}$), definite & indefinite integrals ($\int f(x) dx$), and one-sided/two-sided limits ($\lim_{x \to a} f(x)$).
+- **Statistics:** Population & sample mean ($\mu$), median, variance ($\sigma^2, s^2$), and standard deviation ($\sigma, s$).
+- **LaTeX Step Generation:** Each transformation produces intermediate LaTeX expressions for visual presentation in the student UI.
+
+### 4. Safe Static Programming Assistant (`CodeAssistant`, `/api/v1/tutor/code`)
+Provides safe, isolated software engineering guidance **without executing arbitrary submitted code on the host**:
+- **AST Parsing:** Uses Python's native `ast` module for deterministic static code inspection.
+- **Time Complexity Evaluation:** Analyzes AST loop nesting depth to determine Big-O complexity ($O(1), O(\log n), O(n), O(n^2), O(n^3)$).
+- **Recursion Detection:** Tracks recursive function invocations and identifies potential stack exhaustion risks.
+- **Syntax Error Localization:** Traps `SyntaxError` with line and column numbers and provides student-friendly remediation hints.
+- **Anti-Pattern & Bug Detection:** Identifies Python anti-patterns such as mutable default arguments (`def f(x=[])`) and potential infinite loops (`while True` lacking `break`).
+
+### 5. Educational Document Assistance & Study Aids (`StudyAidGenerator`, `/api/v1/tutor/study-aid`)
+Synthesizes educational reading material into structured learning aids:
+- **Executive Summaries:** High-level conceptual overview of chapters or technical articles.
+- **Key Takeaways:** High-yield bullet points prioritizing core testable insights.
+- **Glossary & Definitions:** Curated terminology dictionary mapping domain concepts to formal definitions.
+- **Revision Notes:** Condensed study sheets with mnemonics, common exam pitfalls, and essential review points.
+
+### 6. Practice Question Generator (`PracticeGenerator`, `/api/v1/tutor/practice`)
+Generates active recall materials categorized by **Bloom's Revised Taxonomy** (`Remember`, `Understand`, `Apply`, `Analyze`, `Evaluate`, `Create`):
+- **Multiple Choice Questions (MCQs):** Exactly 4 distinct options, correct index, and educational rationales explaining why distractors are incorrect.
+- **Worked Problems & Rubrics:** Open-ended problems with comprehensive scoring criteria and step-by-step rubrics.
+
+### 7. Multi-Turn Socratic Tutor Chat (`TutorEngine`, `/api/v1/tutor/chat`)
+- Retains multi-turn conversation context across student queries by persisting dialogue history in SQLite (`SessionMessage`).
+- Integrates Phase 5 RAG hybrid curriculum search to cite verified NCERT/OER sources.
+- Employs the Socratic method to provide guiding hints rather than simply giving away homework answers.
 
 ---
 

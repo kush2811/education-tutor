@@ -96,3 +96,4 @@ class EducationalRAGService:
 
 
 rag_service = EducationalRAGService()
+

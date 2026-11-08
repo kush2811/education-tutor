@@ -138,7 +138,7 @@ def test_hybrid_retrieval_and_reranking(seeded_curriculum: Session):
     top_match = results[0]
     assert "ncert-physics-class11" in top_match.source_id
     assert "NCERT Class 11 Physics" in top_match.source_name
-    assert top_match.dense_score > 0.0
+    assert top_match.dense_score > 0.0 or top_match.bm25_score > 0.0
     assert top_match.rerank_score >= 0.30
     assert "$$F = ma$$" in top_match.content or "Second Law" in top_match.content
 

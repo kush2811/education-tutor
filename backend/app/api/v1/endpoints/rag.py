@@ -77,3 +77,4 @@ def evaluate_rag_pipeline(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"RAG benchmark evaluation failed: {str(e)}"
         )
+
