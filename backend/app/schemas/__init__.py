@@ -8,6 +8,9 @@ from app.schemas.session import (
     MessageCreate,
     MessageResponse,
 )
+from app.schemas.user import UserBase, UserCreate, UserUpdate, UserResponse
+from app.schemas.auth import LoginRequest, TokenResponse, TokenPayload
+from app.schemas.asset import AssetResponse, FileUploadResponse
 
 __all__ = [
     "HealthResponse",
@@ -16,4 +19,13 @@ __all__ = [
     "SessionResponse",
     "MessageCreate",
     "MessageResponse",
+    "UserBase",
+    "UserCreate",
+    "UserUpdate",
+    "UserResponse",
+    "LoginRequest",
+    "TokenResponse",
+    "TokenPayload",
+    "AssetResponse",
+    "FileUploadResponse",
 ]

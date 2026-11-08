@@ -1,3 +1,18 @@
+export interface User {
+  id: string;
+  email: string;
+  full_name: string;
+  grade_level: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
 export interface Message {
   id: string;
   session_id: string;
@@ -10,6 +25,7 @@ export interface Message {
 
 export interface StudySession {
   id: string;
+  user_id?: string;
   student_id: string;
   title: string;
   subject: string;
@@ -26,4 +42,13 @@ export interface HealthStatus {
   environment: string;
   database_status: string;
   timestamp: string;
+}
+
+export interface UploadedFileResponse {
+  asset_id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  status: string;
+  message: string;
 }

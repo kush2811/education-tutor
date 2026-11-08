@@ -1,9 +1,12 @@
 """API v1 router aggregating all endpoints."""
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, session
+from app.api.v1.endpoints import health, session, auth, user, ingest
 
 api_router = APIRouter()
 
 api_router.include_router(health.router, tags=["Health"])
-api_router.include_router(session.router, tags=["Sessions"])
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(user.router, prefix="/users", tags=["Users"])
+api_router.include_router(session.router, tags=["Sessions & Chat"])
+api_router.include_router(ingest.router, prefix="/ingest", tags=["File Ingestion"])

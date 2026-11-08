@@ -151,3 +151,4 @@ export const SessionList: React.FC<SessionListProps> = ({
     </aside>
   );
 };
+

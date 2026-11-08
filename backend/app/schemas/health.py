@@ -12,3 +12,4 @@ class HealthResponse(BaseModel):
     environment: str = Field(..., description="Execution environment")
     database_status: str = Field(..., description="Status of database connectivity")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the health check")
+

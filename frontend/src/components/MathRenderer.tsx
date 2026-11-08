@@ -26,3 +26,4 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ math, block = false 
     />
   );
 };
+

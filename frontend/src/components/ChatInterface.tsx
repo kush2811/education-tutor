@@ -6,12 +6,13 @@ import { MathRenderer } from './MathRenderer';
 interface ChatInterfaceProps {
   session: StudySession | null;
   onSendMessage: (content: string, contentType?: string) => Promise<void>;
-  onAttachCanvas?: () => void;
+  onOpenUpload: () => void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   session,
   onSendMessage,
+  onOpenUpload,
 }) => {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -161,6 +162,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
+                onClick={onOpenUpload}
                 className="p-2 text-slate-400 hover:text-sky-600 hover:bg-slate-50 rounded-xl transition-colors"
                 title="Attach problem screenshot or diagram"
               >

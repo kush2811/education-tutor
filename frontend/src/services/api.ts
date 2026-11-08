@@ -1,6 +1,27 @@
-import { HealthStatus, StudySession, Message } from '../types';
+import { HealthStatus, StudySession, Message, User, TokenResponse, UploadedFileResponse } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1';
+
+// Token storage key
+const TOKEN_KEY = 'ai_tutor_auth_token';
+
+export const tokenStorage = {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+const getHeaders = (isFormData = false): HeadersInit => {
+  const headers: Record<string, string> = {};
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = tokenStorage.get();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
 
 export const api = {
   async getHealth(): Promise<HealthStatus> {
@@ -11,8 +32,50 @@ export const api = {
     return res.json();
   },
 
+  // --- Auth & User ---
+  async register(data: { email: string; password: string; full_name?: string; grade_level?: string }): Promise<User> {
+    const res = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Registration failed');
+    }
+    return res.json();
+  },
+
+  async login(data: { email: string; password: string }): Promise<TokenResponse> {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Invalid email or password');
+    }
+    const tokenData: TokenResponse = await res.json();
+    tokenStorage.set(tokenData.access_token);
+    return tokenData;
+  },
+
+  async getMe(): Promise<User> {
+    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error('Not authenticated');
+    }
+    return res.json();
+  },
+
+  // --- Sessions & Messages ---
   async listSessions(studentId = 'default_student'): Promise<StudySession[]> {
-    const res = await fetch(`${API_BASE_URL}/sessions?student_id=${encodeURIComponent(studentId)}`);
+    const res = await fetch(`${API_BASE_URL}/sessions?student_id=${encodeURIComponent(studentId)}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) {
       throw new Error(`Failed to fetch sessions: ${res.status}`);
     }
@@ -20,7 +83,9 @@ export const api = {
   },
 
   async getSession(sessionId: string): Promise<StudySession> {
-    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}`);
+    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) {
       throw new Error(`Failed to fetch session: ${res.status}`);
     }
@@ -30,7 +95,7 @@ export const api = {
   async createSession(data: { title: string; subject: string; student_id?: string }): Promise<StudySession> {
     const res = await fetch(`${API_BASE_URL}/sessions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify(data),
     });
     if (!res.ok) {
@@ -47,7 +112,7 @@ export const api = {
   }): Promise<Message> {
     const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify(message),
     });
     if (!res.ok) {
@@ -59,9 +124,31 @@ export const api = {
   async deleteSession(sessionId: string): Promise<void> {
     const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
       method: 'DELETE',
+      headers: getHeaders(),
     });
     if (!res.ok && res.status !== 204) {
       throw new Error(`Failed to delete session: ${res.status}`);
     }
+  },
+
+  // --- File Uploads ---
+  async uploadFile(file: File, sessionId?: string): Promise<UploadedFileResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (sessionId) {
+      formData.append('session_id', sessionId);
+    }
+
+    const res = await fetch(`${API_BASE_URL}/ingest/upload`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'File upload failed');
+    }
+    return res.json();
   }
 };
