@@ -1,41 +1,339 @@
-"""Endpoints for file uploads and asset management."""
+"""Endpoints for multimodal input ingestion: text, images, PDF, DOCX, audio, and video."""
 
 import os
-import uuid
-import aiofiles
+from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Optional
 
-from app.core.config import settings
-from app.core.logging import logger
 from app.db.session import get_db
 from app.models.asset import UploadedAsset
+from app.core.logging import logger
+from app.core.file_security import (
+    validate_file_security,
+    get_safe_storage_path,
+    cleanup_temp_file,
+)
+from app.schemas.unified_input import (
+    UnifiedQuestionPayload,
+    TextProcessRequest,
+    AudioTranscriptionResponse,
+)
 from app.schemas.asset import FileUploadResponse, AssetResponse
+from app.services.unified_pipeline import unified_input_pipeline
 
 router = APIRouter()
 
-ALLOWED_MIME_TYPES = {
-    "image/jpeg": "image",
-    "image/png": "image",
-    "image/webp": "image",
-    "image/heic": "image",
-    "application/pdf": "document",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
-    "audio/wav": "audio",
-    "audio/mpeg": "audio",
-    "audio/webm": "audio",
-    "audio/ogg": "audio",
-}
 
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
+@router.post(
+    "/text",
+    response_model=UnifiedQuestionPayload,
+    summary="Process and normalize student text or mathematical inquiry"
+)
+def process_text_input(payload: TextProcessRequest) -> UnifiedQuestionPayload:
+    """Normalize whitespace, convert bracket LaTeX delimiters to standard $ and $$,
+    extract math formulas, and identify the subject domain."""
+    return unified_input_pipeline.process(
+        input_type="text",
+        data=payload.text
+    )
+
+
+@router.post(
+    "/image",
+    response_model=UnifiedQuestionPayload,
+    status_code=status.HTTP_200_OK,
+    summary="Ingest image, preprocess contrast/deskew, and execute vision OCR"
+)
+async def process_image_input(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Ingest textbook photo or student handwritten math note."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "upload.jpg",
+        content_type=file.content_type or "image/jpeg",
+        file_bytes=file_bytes,
+        expected_category="image"
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    # Record in database
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type="image",
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "image/jpeg"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    # Process via multimodal vision pipeline
+    result = unified_input_pipeline.process(
+        input_type="image",
+        data=file_bytes,
+        filename=file.filename,
+        mime_type=file.content_type,
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
+
+
+@router.post(
+    "/pdf",
+    response_model=UnifiedQuestionPayload,
+    summary="Ingest PDF worksheet or textbook chapter with page references and tables"
+)
+async def process_pdf_input(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Extract page-by-page text, tables, and academic citation anchors from PDF."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "worksheet.pdf",
+        content_type=file.content_type or "application/pdf",
+        file_bytes=file_bytes,
+        expected_category="pdf"
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type="document",
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type="application/pdf"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    result = unified_input_pipeline.process(
+        input_type="pdf",
+        data=file_bytes,
+        filename=file.filename,
+        mime_type="application/pdf",
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
+
+
+@router.post(
+    "/docx",
+    response_model=UnifiedQuestionPayload,
+    summary="Ingest Word document with paragraphs, headings, and table structures"
+)
+async def process_docx_input(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Extract structured document sections, headings, and tables from DOCX."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "worksheet.docx",
+        content_type=file.content_type or "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_bytes=file_bytes,
+        expected_category="docx"
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type="document",
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "application/docx"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    result = unified_input_pipeline.process(
+        input_type="docx",
+        data=file_bytes,
+        filename=file.filename,
+        mime_type=file.content_type,
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
+
+
+@router.post(
+    "/audio",
+    response_model=UnifiedQuestionPayload,
+    summary="Process student recorded audio question and execute Speech-to-Text"
+)
+async def process_audio_input(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Transcribe spoken question and return structured representation for confirmation."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "question.wav",
+        content_type=file.content_type or "audio/wav",
+        file_bytes=file_bytes,
+        expected_category="audio"
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type="audio",
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "audio/wav"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    result = unified_input_pipeline.process(
+        input_type="audio",
+        data=file_bytes,
+        filename=file.filename,
+        mime_type=file.content_type or "audio/wav",
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
+
+
+@router.post(
+    "/video",
+    response_model=UnifiedQuestionPayload,
+    summary="Process educational video clip with keyframe sampling and transcript fusion"
+)
+async def process_video_input(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Ingest lecture clip, extract audio transcript, sample keyframes, and combine context."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "lecture.mp4",
+        content_type=file.content_type or "video/mp4",
+        file_bytes=file_bytes,
+        expected_category="video"
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type="video",
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "video/mp4"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    result = unified_input_pipeline.process(
+        input_type="video",
+        data=file_bytes,
+        filename=file.filename,
+        mime_type=file.content_type or "video/mp4",
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
+
+
+@router.post(
+    "/unified",
+    response_model=UnifiedQuestionPayload,
+    summary="Master unified endpoint: auto-detects file category or text and processes"
+)
+async def process_unified_file(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+) -> UnifiedQuestionPayload:
+    """Accepts any valid multimodal file (image, PDF, DOCX, audio, video), validates security,
+    saves safely, routes to specialized processor, and returns the common UnifiedQuestionPayload."""
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "input_file",
+        content_type=file.content_type or "application/octet-stream",
+        file_bytes=file_bytes
+    )
+
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
+
+    asset = UploadedAsset(
+        session_id=session_id,
+        file_name=file.filename or safe_name,
+        file_type=category,
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "application/octet-stream"
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+
+    result = unified_input_pipeline.process(
+        input_type=category,
+        data=file_bytes,
+        filename=file.filename,
+        mime_type=file.content_type,
+        file_path=dest_path
+    )
+    if result.source_file:
+        result.source_file.asset_id = asset.id
+
+    return result
 
 
 @router.post(
     "/upload",
     response_model=FileUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload an image, document, or audio file"
+    summary="Standard asset upload endpoint (Phase 1 compatibility)"
 )
 async def upload_file(
     file: UploadFile = File(...),
@@ -43,58 +341,28 @@ async def upload_file(
     db: Session = Depends(get_db)
 ) -> FileUploadResponse:
     """Store an uploaded asset locally and record metadata in database."""
-    content_type = file.content_type or "application/octet-stream"
-    
-    # MIME type detection
-    file_type = ALLOWED_MIME_TYPES.get(content_type)
-    if not file_type:
-        # Fallback check based on extension
-        ext = os.path.splitext(file.filename or "")[1].lower()
-        if ext in [".jpg", ".jpeg", ".png", ".webp"]:
-            file_type = "image"
-        elif ext in [".pdf", ".docx"]:
-            file_type = "document"
-        elif ext in [".wav", ".mp3", ".ogg", ".webm"]:
-            file_type = "audio"
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported file type '{content_type}'. Allowed types: JPG, PNG, WEBP, PDF, DOCX, WAV, MP3."
-            )
+    file_bytes = await file.read()
+    category, ext, safe_name = validate_file_security(
+        filename=file.filename or "uploaded_file",
+        content_type=file.content_type or "application/octet-stream",
+        file_bytes=file_bytes
+    )
 
-    asset_id = str(uuid.uuid4())
-    safe_filename = f"{asset_id}_{file.filename}"
-    upload_subdir = os.path.join(settings.UPLOAD_DIR, file_type + "s")
-    os.makedirs(upload_subdir, exist_ok=True)
-    destination_path = os.path.join(upload_subdir, safe_filename)
+    dest_path = get_safe_storage_path(category, safe_name)
+    with open(dest_path, "wb") as f:
+        f.write(file_bytes)
 
-    # Read and validate size
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File size exceeds maximum allowed limit (50MB)."
-        )
-
-    # Save to disk
-    async with aiofiles.open(destination_path, "wb") as f:
-        await f.write(contents)
-
-    # Record in database
     new_asset = UploadedAsset(
-        id=asset_id,
         session_id=session_id,
-        file_name=file.filename or "uploaded_file",
-        file_type=file_type,
-        file_path=destination_path,
-        file_size=len(contents),
-        mime_type=content_type,
+        file_name=file.filename or safe_name,
+        file_type=category,
+        file_path=dest_path,
+        file_size=len(file_bytes),
+        mime_type=file.content_type or "application/octet-stream",
     )
     db.add(new_asset)
     db.commit()
     db.refresh(new_asset)
-
-    logger.info(f"Uploaded file {file.filename} saved to {destination_path} (asset_id={asset_id})")
 
     return FileUploadResponse(
         asset_id=new_asset.id,
@@ -120,4 +388,3 @@ def get_asset(asset_id: str, db: Session = Depends(get_db)) -> AssetResponse:
             detail=f"Asset '{asset_id}' not found."
         )
     return asset
-

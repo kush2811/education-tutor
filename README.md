@@ -67,18 +67,19 @@ ai-multimodal-tutor/
 │   │   │   └── v1/
 │   │   │       ├── endpoints/
 │   │   │       │   ├── auth.py          # Student registration, login, /me JWT verification
-│   │   │       │   ├── user.py          # Student profile management
+│   │   │       │   ├── user.py          # Student profile management & dashboard analytics
 │   │   │       │   ├── health.py        # System health & DB readiness endpoint
 │   │   │       │   ├── session.py       # Tutoring session & message CRUD (Conversations)
-│   │   │       │   └── ingest.py        # File, image & document upload foundation
+│   │   │       │   └── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
 │   │   │       └── router.py            # Aggregated v1 API router
 │   │   ├── core/
 │   │   │   ├── config.py                # Pydantic Settings & environment config
+│   │   │   ├── file_security.py         # MIME validation, size limits & sanitization
 │   │   │   ├── logging.py               # Structured application logger
 │   │   │   └── security.py              # PBKDF2 password hashing & HMAC-SHA256 JWT
 │   │   ├── db/
 │   │   │   ├── base.py                  # SQLAlchemy declarative base
-│   │   │   └── session.py               # Engine and sessionmaker provider
+│   │   │   └── session.py               # Synchronous SQLite session provider
 │   │   ├── models/
 │   │   │   ├── user.py                  # User / Student profile ORM model
 │   │   │   ├── session.py               # StudySession & SessionMessage ORM models
@@ -88,21 +89,21 @@ ai-multimodal-tutor/
 │   │   │   ├── auth.py                  # Login, registration, token schemas
 │   │   │   ├── user.py                  # User profile schemas
 │   │   │   ├── session.py               # Session & Message request/response schemas
-│   │   │   └── asset.py                 # Uploaded file schemas
+│   │   │   ├── asset.py                 # Uploaded file schemas
+│   │   │   └── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
 │   │   ├── services/
-│   │   │   ├── ai_gateway.py            # Gemini 1.5 Flash/Pro LLM Gateway
-│   │   │   ├── socratic_engine.py       # Socratic hint progression state machine
-│   │   │   ├── sympy_verifier.py        # Symbolic algebraic verification
-│   │   │   ├── vision_ocr.py            # Multimodal handwriting & diagram OCR
-│   │   │   ├── doc_parser.py            # PyMuPDF PDF & DOCX layout-aware parser
-│   │   │   ├── rag_engine.py            # Hybrid RAG retrieval engine
-│   │   │   ├── knowledge_base.py        # Verified OER & curriculum manager
-│   │   │   ├── voice_service.py         # Faster-Whisper & Edge-TTS voice service
-│   │   │   └── subtitle_aligner.py      # Word timestamp offset alignment engine
+│   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
+│   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
+│   │   │   ├── pdf_processor.py         # PyMuPDF page-aware extraction & table parser
+│   │   │   ├── docx_processor.py        # python-docx structured hierarchy parser
+│   │   │   ├── audio_processor.py       # Audio STT with Gemini & offline fallback
+│   │   │   ├── video_processor.py       # 30s keyframe sampling & multimodal audio/visual fusion
+│   │   │   └── unified_pipeline.py      # Master input router to UnifiedQuestionPayload
 │   │   └── main.py                      # FastAPI app factory, CORS & lifespan
 │   ├── tests/
-│   │   ├── conftest.py                  # Pytest fixtures & async test client
-│   │   └── test_api.py                  # Health, Auth, Session & Upload test suite
+│   │   ├── conftest.py                  # Pytest fixtures & test client
+│   │   ├── test_api.py                  # Health, Auth, Session & Upload test suite
+│   │   └── test_multimodal.py           # Comprehensive multimodal ingestion test suite
 │   ├── requirements.txt                 # Backend Python dependencies
 │   ├── pytest.ini                       # Pytest test runner config
 │   └── .env.example                     # Backend environment template
@@ -115,8 +116,16 @@ ai-multimodal-tutor/
 │   │   │   ├── FileUploadModal.tsx      # Image, PDF & worksheet uploader
 │   │   │   ├── Header.tsx               # App header with live backend status & auth
 │   │   │   ├── MathRenderer.tsx         # KaTeX formula renderer for $...$ and $$...$$
+│   │   │   ├── ProfileModal.tsx         # User profile and learning progress
 │   │   │   ├── SessionList.tsx          # Study sessions sidebar with creation modal
+│   │   │   ├── TutorResponse.tsx        # Socratic markdown answer display with KaTeX & code
+│   │   │   ├── VoicePlayer.tsx          # Audio playback dock with sentence highlighting
 │   │   │   └── WhiteboardCanvas.tsx     # Interactive student scratchpad & canvas
+│   │   ├── pages/
+│   │   │   ├── LandingPage.tsx          # Landing page with feature highlights & hero
+│   │   │   ├── LoginPage.tsx            # Full-page login interface
+│   │   │   ├── RegisterPage.tsx         # Registration interface with grade/subject selection
+│   │   │   └── StudentDashboard.tsx     # Student dashboard with metrics & active sessions
 │   │   ├── services/
 │   │   │   └── api.ts                   # Type-safe API client (Auth, Sessions, Uploads)
 │   │   ├── types/
@@ -130,6 +139,12 @@ ai-multimodal-tutor/
 │   ├── tsconfig.json                    # TypeScript compiler options
 │   ├── tailwind.config.js               # Tailwind styling configuration
 │   └── .env.example                     # Frontend environment template
+├── scripts/
+│   ├── run_backend.ps1                  # PowerShell script to start FastAPI backend
+│   └── run_frontend.ps1                 # PowerShell script to start Vite frontend
+├── .env.example                         # Master environment variables template
+├── .gitignore                           # Git ignore rules for Python, Node, DB & secrets
+└── README.md                            # Comprehensive technical documentation
 ├── scripts/
 │   ├── run_backend.ps1                  # PowerShell script to start FastAPI backend
 │   └── run_frontend.ps1                 # PowerShell script to start Vite frontend
@@ -217,13 +232,34 @@ npm run build
 
 | Phase | Description | Status |
 | :--- | :--- | :--- |
-| **Phase 0** | **System Architecture & Technical Blueprint** | ✅ Completed & Approved |
-| **Phase 1** | **Project Setup & Foundation (Backend, Frontend, DB, Auth, Uploads)** | ✅ Completed |
-| **Phase 2** | **Multimodal Input Ingestion Pipeline (Image, OCR, PDF/DOCX & Math Parsing)** | ⏳ Queued for Approval |
-| **Phase 3** | **Video Lecture Processing Engine** | ⏳ Queued |
-| **Phase 4** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued |
+| **Phase 0** | **Project Analysis & System Architecture** | ✅ Completed & Approved |
+| **Phase 1** | **Project Setup & Foundation (FastAPI, SQLite, React, Vite, Tailwind)** | ✅ Completed & Approved |
+| **Phase 2** | **Student Interface & Authentication (Dashboard, Socratic Chat, Voice Dock)** | ✅ Completed & Approved |
+| **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed (Awaiting Approval) |
+| **Phase 4** | **Socratic Tutoring Engine & Symbolic Math Verification (SymPy + Gemini)** | ⏳ Queued for Phase 4 |
 | **Phase 5** | **Knowledge Retrieval & Verifiable RAG System (ChromaDB + Textbook Indexing)**| ⏳ Queued |
 | **Phase 6** | **Conversational Voice Pipeline & Synchronized Subtitles** | ⏳ Queued |
-| **Phase 7** | **Interactive Multimodal Student UI & Whiteboard Integration** | ⏳ Queued |
+| **Phase 7** | **Document Summarization, Practice Questions & MCQ Generation** | ⏳ Queued |
 | **Phase 8** | **Student Mastery Analytics & Multi-Session Memory** | ⏳ Queued |
 | **Phase 9** | **End-to-End Testing, Security Hardening & Documentation** | ⏳ Queued |
+
+---
+
+## 📥 Phase 3: Multimodal Ingestion Pipeline
+
+The multimodal ingestion layer normalizes all student input channels into a single standardized schema: `UnifiedQuestionPayload`.
+
+### 1. Ingestion Endpoints (`/api/v1/ingest/`)
+- `POST /text`: Whitespace cleaning, bracket LaTeX delimiter conversion (`\[...\]` $\rightarrow$ `$$...$$`, `\(...\)` $\rightarrow$ `$`), equation detection, and academic domain routing.
+- `POST /image`: Pillow contrast stretching, auto-orientation deskew, Gemini 1.5 Flash Vision OCR extracting handwritten formulas and geometric diagrams.
+- `POST /pdf`: PyMuPDF layout-aware text extraction, table extraction (`find_tables`), page-indexed academic citation anchors.
+- `POST /docx`: `python-docx` heading hierarchy parsing, table restructuring into markdown grids, paragraph grouping.
+- `POST /audio`: Direct Gemini multimodal audio STT with offline fallback and student transcript confirmation flag.
+- `POST /video`: 30-second keyframe sampling strategy, visual blackboard OCR + audio track transcription fusion, timestamped reference anchors.
+- `POST /unified`: Master polymorph endpoint detecting MIME category automatically and dispatching to the appropriate parser.
+
+### 2. File Security Safeguards (`app/core/file_security.py`)
+- **Strict Size Limits:** Text (64 KB), Image (20 MB), PDF (50 MB), DOCX (25 MB), Audio (25 MB), Video (100 MB).
+- **MIME & Extension Enforcement:** Whitelist-based validation preventing executable uploads and spoofed extensions.
+- **Path Sanitization:** Filename sanitization with UUID prefixes preventing directory traversal.
+- **Temporary Cleanup:** Automatic resource cleanup on failed extractions.
