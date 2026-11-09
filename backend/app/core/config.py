@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     ENABLE_RATE_LIMITER: bool = True
     RATE_LIMIT_PER_MINUTE: int = 120
 
+    # Production Monitoring & Logging
+    SENTRY_DSN: str = ""
+    LOG_FORMAT: str = "text"  # "text" or "json"
+    LOG_FILE_PATH: str = "./storage/logs/tutor.log"
+    ENABLE_FILE_LOGGING: bool = False
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",

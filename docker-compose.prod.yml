@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai_tutor_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tutor_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ChangeMeSecurePassword2026!}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_tutor_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_tutor_backend_prod
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=False
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-tutor_admin}:${POSTGRES_PASSWORD:-ChangeMeSecurePassword2026!}@postgres:5432/${POSTGRES_DB:-ai_tutor_prod}
+      - UPLOAD_DIR=/app/storage/uploads
+      - VECTOR_STORE_DIR=/app/storage/vector_store
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://tutor.example.com}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - ENABLE_RATE_LIMITER=True
+      - RATE_LIMIT_PER_MINUTE=120
+      - WEB_CONCURRENCY=4
+    volumes:
+      - persistent_storage:/app/storage
+    networks:
+      - internal_network
+      - edge_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai_tutor_frontend_prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - edge_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  persistent_storage:
+    driver: local
+
+networks:
+  internal_network:
+    internal: true
+  edge_network:
+    driver: bridge

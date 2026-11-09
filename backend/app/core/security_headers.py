@@ -1,33 +1,29 @@
 """Security headers middleware for protecting against MIME-sniffing, clickjacking, and XSS."""
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Injects essential security headers into every HTTP response."""
+class SecurityHeadersMiddleware:
+    """Injects essential security headers into every HTTP response via pure ASGI."""
 
-    async def dispatch(self, request: Request, call_next):
-        response: Response = await call_next(request)
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
-        # Protect against MIME type confusion / sniffing
-        response.headers["X-Content-Type-Options"] = "nosniff"
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        # Prevent frame injection & clickjacking
-        response.headers["X-Frame-Options"] = "DENY"
+        async def send_with_security_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["X-XSS-Protection"] = "1; mode=block"
+                headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+                headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                headers["Permissions-Policy"] = "microphone=(self), camera=()"
+            await send(message)
 
-        # Enable browser XSS filtering
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-
-        # Strict Transport Security (HSTS)
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-
-        # Referrer Policy
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-
-        # Content Security Policy (allow local scripts, styles, fonts, KaTeX, and audio)
-        response.headers["Permissions-Policy"] = "microphone=(self), camera=()"
-
-        return response
-
+        await self.app(scope, receive, send_with_security_headers)

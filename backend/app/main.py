@@ -39,6 +39,18 @@ async def lifespan(app: FastAPI):
 
 def create_application() -> FastAPI:
     """Factory function to build and configure the FastAPI application."""
+    if settings.SENTRY_DSN:
+        try:
+            import sentry_sdk
+            sentry_sdk.init(
+                dsn=settings.SENTRY_DSN,
+                environment=settings.ENVIRONMENT,
+                traces_sample_rate=0.2 if settings.ENVIRONMENT == "production" else 1.0,
+            )
+            logger.info("Sentry error monitoring initialized successfully.")
+        except Exception as e:
+            logger.warning(f"Sentry error monitoring skipped: {e}")
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         version=settings.VERSION,

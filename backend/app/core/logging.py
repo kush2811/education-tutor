@@ -43,6 +43,27 @@ def setup_logging() -> logging.Logger:
     # Clear existing handlers to avoid duplicates
     logger.handlers.clear()
     logger.addHandler(handler)
+
+    # Optional Production File Logging with Rotation
+    if settings.ENABLE_FILE_LOGGING and settings.LOG_FILE_PATH:
+        try:
+            import os
+            from logging.handlers import RotatingFileHandler
+            log_dir = os.path.dirname(settings.LOG_FILE_PATH)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                settings.LOG_FILE_PATH,
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=5,
+                encoding="utf-8"
+            )
+            file_handler.addFilter(SensitiveDataFilter())
+            file_handler.setFormatter(logging.Formatter(log_format))
+            logger.addHandler(file_handler)
+        except Exception as e:
+            sys.stderr.write(f"Failed to initialize rotating file logger: {e}\n")
+
     logger.propagate = False
 
     return logger
