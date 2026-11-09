@@ -154,40 +154,44 @@ export const App: React.FC = () => {
   const handleSendMessage = async (content: string, contentType = 'text') => {
     if (!activeSessionId) return;
     try {
-      const userMsg = await api.addMessage(activeSessionId, {
-        sender_role: 'user',
-        content,
-        content_type: contentType,
-      });
+      // Execute live AI Tutor End-to-End Pipeline
+      try {
+        await api.executePipeline({
+          query: content,
+          session_id: activeSessionId,
+          subject: activeSession?.subject,
+          level: currentUser?.preferred_explanation_level || 'intermediate',
+          preferred_voice: currentUser?.preferred_voice || 'en-US-AriaNeural',
+          playback_speed: currentUser?.preferred_playback_speed || 1.0,
+          synthesize_voice: true,
+          input_type: contentType,
+        });
 
-      setActiveSession((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          messages: [...prev.messages, userMsg],
-        };
-      });
+        // Fetch fresh session state with persisted messages, citations and voice links
+        const updatedSession = await api.getSession(activeSessionId);
+        setActiveSession(updatedSession);
+      } catch (pipelineErr) {
+        console.warn('Live pipeline call encountered issue, falling back to direct message save:', pipelineErr);
+        const userMsg = await api.addMessage(activeSessionId, {
+          sender_role: 'user',
+          content,
+          content_type: contentType,
+        });
 
-      // Socratic baseline response
-      setTimeout(async () => {
-        try {
-          const tutorMsg = await api.addMessage(activeSessionId, {
-            sender_role: 'assistant',
-            content: `### Socratic Problem Guidance\n\nI received your inquiry:\n> ${content}\n\nLet's break this down systematically:\n\n1. What is the fundamental concept or theorem governing this problem?\n2. What variables or parameters are explicitly given in the problem statement?\n\nTake a moment to formulate your initial hypothesis: what formula would you apply first?`,
-            content_type: 'text',
-          });
+        const fallbackMsg = await api.addMessage(activeSessionId, {
+          sender_role: 'assistant',
+          content: `### 🎓 Socratic Problem Guidance\n\nI received your inquiry:\n> ${content}\n\nLet's analyze this step-by-step:\n1. Identify the governing physical or mathematical law.\n2. List all known parameters and isolate target unknowns.\n3. Formulate your hypothesis before substituting numbers.`,
+          content_type: 'text',
+        });
 
-          setActiveSession((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              messages: [...prev.messages, tutorMsg],
-            };
-          });
-        } catch (e) {
-          console.error('Tutor response failed:', e);
-        }
-      }, 500);
+        setActiveSession((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            messages: [...prev.messages, userMsg, fallbackMsg],
+          };
+        });
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
     }

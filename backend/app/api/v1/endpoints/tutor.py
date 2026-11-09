@@ -39,6 +39,11 @@ def solve_problem(
 ) -> TutorProblemSolveResponse:
     """Decomposes a problem into given info, required result, intermediate steps, verified answer,
     and why it works across Beginner, Intermediate, or Advanced explanation levels."""
+    if not request.query or not request.query.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inquiry query cannot be empty or purely whitespace."
+        )
     try:
         return tutor_engine.solve_problem(request=request, db=db)
     except Exception as e:

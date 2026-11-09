@@ -27,8 +27,8 @@ class SymPyMathSolver:
         clean = expr_str.strip()
         # Strip outer delimiters $ or $$
         clean = re.sub(r'^\${1,2}|\${1,2}$', '', clean).strip()
-        # Strip leading English operational verbs if present
-        clean = re.sub(r'^(?:differentiate|derivative\s+of|find\s+the\s+derivative\s+of|integrate|integral\s+of|solve\s+for\s+\w+|solve|factor|expand|evaluate|calculate)\s+', '', clean, flags=re.IGNORECASE).strip()
+        # Strip leading English operational verbs if present (including colons e.g. "Solve for x:")
+        clean = re.sub(r'^(?:differentiate|derivative\s+of|find\s+the\s+derivative\s+of|integrate|integral\s+of|solve\s+for\s+\w+:?|solve:?|factor|expand|evaluate|calculate)\s*', '', clean, flags=re.IGNORECASE).strip()
         # Standardize LaTeX brackets
         clean = clean.replace(r'\[', '').replace(r'\]', '')
         # Replace LaTeX fractions \frac{a}{b} -> (a)/(b)

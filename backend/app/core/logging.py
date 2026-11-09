@@ -1,30 +1,51 @@
-"""Structured logging configuration for backend services."""
+"""Structured logging configuration for backend services with sensitive data masking."""
 
 import logging
+import re
 import sys
 from app.core.config import settings
 
 
+class SensitiveDataFilter(logging.Filter):
+    """Masks API keys, JWT bearer tokens, and credentials from log outputs."""
+
+    # Patterns for sensitive credentials
+    PATTERNS = [
+        (re.compile(r'AIza[0-9A-Za-z-_]{35}'), 'AIza***[REDACTED_API_KEY]'),
+        (re.compile(r'sk-[0-9A-Za-z-_]{20,}'), 'sk-***[REDACTED_API_KEY]'),
+        (re.compile(r'Bearer\s+[A-Za-z0-9\-_\.]+', re.IGNORECASE), 'Bearer [REDACTED_TOKEN]'),
+        (re.compile(r'(password|secret|key)["\']?\s*[:=]\s*["\']?[^"\',\s]+', re.IGNORECASE), r'\1=[REDACTED]'),
+    ]
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            masked = record.msg
+            for pattern, replacement in self.PATTERNS:
+                masked = pattern.sub(replacement, masked)
+            record.msg = masked
+        return True
+
+
 def setup_logging() -> logging.Logger:
-    """Configure and return root application logger."""
+    """Configure and return root application logger with sensitive data protection."""
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
     
     log_format = (
         "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s"
     )
     
-    logging.basicConfig(
-        level=log_level,
-        format=log_format,
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    
+    handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(SensitiveDataFilter())
+    handler.setFormatter(logging.Formatter(log_format))
+
     logger = logging.getLogger("ai_tutor")
     logger.setLevel(log_level)
+    # Clear existing handlers to avoid duplicates
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.propagate = False
+
     return logger
 
 
 logger = setup_logging()
-

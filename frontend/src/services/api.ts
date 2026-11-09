@@ -249,5 +249,62 @@ export const api = {
       throw new Error('Speech normalization failed');
     }
     return res.json();
+  },
+
+  // --- End-to-End Tutoring Pipeline ---
+  async executePipeline(data: {
+    query: string;
+    session_id?: string;
+    subject?: string;
+    level?: string;
+    preferred_voice?: string;
+    playback_speed?: number;
+    synthesize_voice?: boolean;
+    input_type?: string;
+  }): Promise<import('../types').PipelineResponse> {
+    const res = await fetch(`${API_BASE_URL}/pipeline/execute`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Pipeline execution failed');
+    }
+    return res.json();
+  },
+
+  async executePipelineFile(
+    file: File,
+    options?: {
+      session_id?: string;
+      subject?: string;
+      level?: string;
+      preferred_voice?: string;
+      playback_speed?: number;
+      synthesize_voice?: boolean;
+    }
+  ): Promise<import('../types').PipelineResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options?.session_id) formData.append('session_id', options.session_id);
+    if (options?.subject) formData.append('subject', options.subject);
+    if (options?.level) formData.append('level', options.level);
+    if (options?.preferred_voice) formData.append('preferred_voice', options.preferred_voice);
+    if (options?.playback_speed) formData.append('playback_speed', options.playback_speed.toString());
+    if (options?.synthesize_voice !== undefined) {
+      formData.append('synthesize_voice', options.synthesize_voice.toString());
+    }
+
+    const res = await fetch(`${API_BASE_URL}/pipeline/execute-file`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Pipeline file execution failed');
+    }
+    return res.json();
   }
 };

@@ -123,3 +123,28 @@ export interface DashboardStats {
   recent_sessions: RecentSessionItem[];
   recommended_topics: string[];
 }
+
+export interface PipelineResponse {
+  session_id?: string;
+  input_type: string;
+  extracted_question: string;
+  detected_math: string[];
+  query_intent: string;
+  subject: string;
+  retrieved_chunks_count: number;
+  citations: MessageCitation[];
+  sympy_verified: boolean;
+  sympy_result?: string;
+  formatted_markdown: string;
+  validation: Record<string, any>;
+  voice?: TTSVoiceResponse;
+  performance_metrics: {
+    input_processing_time_ms: number;
+    query_classification_time_ms: number;
+    retrieval_time_ms: number;
+    answer_generation_time_ms: number;
+    validation_time_ms: number;
+    tts_generation_time_ms: number;
+    total_response_time_ms: number;
+  };
+}

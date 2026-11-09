@@ -40,7 +40,7 @@ class TextNormalizer:
         return cleaned.strip()
 
     def extract_math_formulas(self, text: str) -> List[str]:
-        """Extract all LaTeX formulas encapsulated in $...$ or $$...$$."""
+        """Extract all LaTeX formulas encapsulated in $...$ or $$...$$ or raw equation patterns."""
         formulas = []
         # Find block math
         block_matches = re.findall(r"\$\$(.*?)\$\$", text, flags=re.DOTALL)
@@ -51,6 +51,11 @@ class TextNormalizer:
         temp_text = re.sub(r"\$\$.*?\$\$", "___BLOCK_MATH___", text, flags=re.DOTALL)
         inline_matches = re.findall(r"\$([^\$]+?)\$", temp_text)
         formulas.extend([m.strip() for m in inline_matches if m.strip()])
+
+        # Also detect raw equations with arithmetic/algebraic assignments (e.g. x^2 - 16 = 0)
+        if not formulas:
+            raw_eqs = re.findall(r'[a-zA-Z0-9_\^]+(?:\s*[\+\-\*\/]\s*[a-zA-Z0-9_\^]+)*\s*=\s*[a-zA-Z0-9_\^\-]+', text)
+            formulas.extend([e.strip() for e in raw_eqs if e.strip()])
 
         return formulas
 

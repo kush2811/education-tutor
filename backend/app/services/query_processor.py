@@ -76,7 +76,7 @@ class EducationalQueryProcessor:
         q = query.lower()
         if any(w in q for w in ["formula for", "equation of", "state the law", "state the theorem"]):
             return "formula_lookup"
-        elif any(w in q for w in ["how to solve", "step by step", "calculate", "find the value", "prove that"]):
+        elif any(w in q for w in ["how to solve", "solve for", "solve", "step by step", "calculate", "find the value", "prove that", "evaluate"]):
             return "step_by_step_solution"
         elif any(w in q for w in ["why does", "how does", "explain why", "conceptual"]):
             return "conceptual_explanation"
@@ -121,6 +121,21 @@ class EducationalQueryProcessor:
             filters["academic_level"] = "Undergraduate"
 
         return filters
+
+    def process_query(self, query: str, subject: Optional[str] = None) -> Dict[str, Any]:
+        """Convenience method returning a consolidated dictionary of processed query attributes."""
+        normalized = self.normalize(query)
+        detected_subject = subject or self.identify_subject(normalized)
+        intent = self.classify_intent(normalized)
+        expanded = self.expand_query(normalized, detected_subject)
+        filters = self.extract_filters(normalized)
+        return {
+            "normalized_query": normalized,
+            "subject": detected_subject,
+            "intent": intent,
+            "expanded_query": expanded,
+            "filters": filters
+        }
 
 
 query_processor = EducationalQueryProcessor()

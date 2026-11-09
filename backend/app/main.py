@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.rate_limiter import RateLimitMiddleware
 import app.models  # Ensure all ORM models are registered with Base
 from app.db.base import Base
 from app.db.session import engine
@@ -43,6 +45,10 @@ def create_application() -> FastAPI:
         description="Modular AI-Powered Multimodal Student Tutor API supporting Text, Vision, Math & Voice interactions.",
         lifespan=lifespan,
     )
+
+    # Security Headers & Rate Limiting Middlewares
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RateLimitMiddleware)
 
     # Configure CORS middleware
     app.add_middleware(

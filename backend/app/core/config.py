@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Symbolic Math Verification
     ENABLE_SYMPY_VERIFICATION: bool = True
 
+    # Security & Rate Limiting
+    ENABLE_RATE_LIMITER: bool = True
+    RATE_LIMIT_PER_MINUTE: int = 120
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",

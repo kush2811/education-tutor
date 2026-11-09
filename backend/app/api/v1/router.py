@@ -1,7 +1,7 @@
 """API v1 router aggregating all endpoints."""
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, session, auth, user, ingest, knowledge, rag, tutor, validation, voice
+from app.api.v1.endpoints import health, session, auth, user, ingest, knowledge, rag, tutor, validation, voice, pipeline
 
 api_router = APIRouter()
 
@@ -15,3 +15,4 @@ api_router.include_router(rag.router, prefix="/rag", tags=["Retrieval-Augmented 
 api_router.include_router(tutor.router, prefix="/tutor", tags=["AI Tutor & Educational Problem Solver"])
 api_router.include_router(validation.router, prefix="/validation", tags=["Answer Validation & Hallucination Control"])
 api_router.include_router(voice.router, prefix="/voice", tags=["Text-to-Speech & Subtitles"])
+api_router.include_router(pipeline.router, prefix="/pipeline", tags=["End-to-End Tutoring Pipeline"])
