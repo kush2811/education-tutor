@@ -10,7 +10,6 @@ import {
   Sparkles,
   ArrowRight,
   Plus,
-  Compass,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardStats, User } from '../types';
@@ -189,116 +188,74 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
         </div>
 
-        {/* Content Section: Recent Sessions + Recommended Topics */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Recent Sessions List */}
-          <div className="lg:col-span-2 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-sky-600" />
-                Recent Tutoring Sessions
-              </h3>
+        {/* Content Section: Recent Sessions */}
+        <div className="w-full bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-sky-600" />
+              Recent Tutoring Sessions
+            </h3>
+            <button
+              onClick={() => onStartSession()}
+              className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1"
+            >
+              <span>New Session</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="py-8 text-center text-xs text-slate-400">Loading your sessions...</div>
+          ) : !stats?.recent_sessions || stats.recent_sessions.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                <MessageSquare className="w-6 h-6" />
+              </div>
+              <h4 className="text-sm font-semibold text-slate-700">No sessions yet</h4>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                Start your first guided tutoring session to practice STEM problem solving.
+              </p>
               <button
                 onClick={() => onStartSession()}
-                className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1"
+                className="mt-4 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-colors"
               >
-                <span>New Session</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                Start First Session
               </button>
             </div>
-
-            {loading ? (
-              <div className="py-8 text-center text-xs text-slate-400">Loading your sessions...</div>
-            ) : !stats?.recent_sessions || stats.recent_sessions.length === 0 ? (
-              <div className="py-12 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                  <MessageSquare className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-semibold text-slate-700">No sessions yet</h4>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-                  Start your first guided tutoring session to practice STEM problem solving.
-                </p>
-                <button
-                  onClick={() => onStartSession()}
-                  className="mt-4 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-colors"
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {stats.recent_sessions.map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => onResumeSession(s.id)}
+                  className="py-3.5 flex items-center justify-between hover:bg-slate-50/70 rounded-xl px-3 -mx-3 cursor-pointer transition-colors group"
                 >
-                  Start First Session
-                </button>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {stats.recent_sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    onClick={() => onResumeSession(s.id)}
-                    className="py-3.5 flex items-center justify-between hover:bg-slate-50/70 rounded-xl px-3 -mx-3 cursor-pointer transition-colors group"
-                  >
-                    <div className="min-w-0 flex-1 pr-4">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
-                          {s.subject}
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {new Date(s.updated_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <h4 className="font-semibold text-sm text-slate-800 truncate group-hover:text-sky-600 transition-colors">
-                        {s.title}
-                      </h4>
+                  <div className="min-w-0 flex-1 pr-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
+                        {s.subject}
+                      </span>
                       <span className="text-[11px] text-slate-400">
-                        {s.message_count} messages exchanged
+                        {new Date(s.updated_at).toLocaleDateString()}
                       </span>
                     </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-semibold text-sky-600 group-hover:translate-x-1 transition-transform">
-                        Resume &rarr;
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Recommended Topics for Grade Level */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between">
-            <div>
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2 mb-1">
-                <Compass className="w-4 h-4 text-indigo-600" />
-                Recommended For You
-              </h3>
-              <p className="text-xs text-slate-400 mb-4">
-                Curated for {currentUser?.grade_level || 'Grade 10'} curriculum
-              </p>
-
-              <div className="space-y-2.5">
-                {(stats?.recommended_topics || [
-                  'Solving Quadratic Equations with the Quadratic Formula',
-                  'Kinematics: Velocity and Acceleration Derivations',
-                  'Coordinate Geometry: Distance Formula & Graphs',
-                  'Chemical Reactions: Balancing Stoichiometry',
-                ]).map((topic, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => onStartSession(topic, topic.split(':')[0] || 'Mathematics')}
-                    className="p-3 rounded-xl bg-slate-50 hover:bg-sky-50 border border-slate-200/60 hover:border-sky-200 cursor-pointer transition-all group"
-                  >
-                    <span className="text-xs font-semibold text-slate-700 group-hover:text-sky-700 block leading-snug">
-                      {topic}
-                    </span>
-                    <span className="text-[10px] text-sky-600 font-medium mt-1 inline-block">
-                      Start Guided Practice &rarr;
+                    <h4 className="font-semibold text-sm text-slate-800 truncate group-hover:text-sky-600 transition-colors">
+                      {s.title}
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      {s.message_count} messages exchanged
                     </span>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            <div className="mt-6 pt-4 border-t border-slate-100 text-[11px] text-slate-400">
-              Topics adapt automatically based on your academic grade and practice history.
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-semibold text-sky-600 group-hover:translate-x-1 transition-transform">
+                      Resume &rarr;
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
