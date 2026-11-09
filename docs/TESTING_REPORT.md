@@ -85,3 +85,4 @@ To maintain total transparency, the following limitations are noted:
 2. **Video Slide OCR Resolution:** Chalkboard lectures with heavy teacher occlusion require keyframe sampling at $> 1\text{ frame/sec}$, increasing temporary processing time.
 3. **Symbolic Calculus Scope:** While SymPy solves polynomial algebra, standard derivatives, and single-variable integrals reliably, non-linear partial differential equations (PDEs) require specialized numerical solvers.
 4. **Edge-TTS Cloud Dependency:** Neural voice generation requires an internet connection to Microsoft Edge-TTS servers; in offline environments, the system falls back to client-side Web Speech synthesis or pre-cached audio.
+

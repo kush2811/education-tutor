@@ -123,3 +123,4 @@ python ../scripts/demonstration_walkthrough.py
 - Click **Rename Session** to label it *"Physics & Kinematics Review"*.
 - Click **"+ New Session"** to start a separate conversation on Biology or Python.
 - Click back on *"Physics & Kinematics Review"*; verify all previous turns, mathematical equations, and audio player states are instantly restored.
+

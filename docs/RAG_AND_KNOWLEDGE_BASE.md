@@ -86,3 +86,4 @@ The system includes an automated evaluation harness (`rag_evaluator.py`) computi
 - **Normalized Discounted Cumulative Gain (NDCG@5):** Evaluates ranking quality.
 - **Context Relevance Precision:** Validates absence of extraneous noise.
 - **Citation Faithfulness Score:** Fraction of generated statements verified by chunk sentences.
+

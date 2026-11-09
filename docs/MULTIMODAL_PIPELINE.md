@@ -85,3 +85,4 @@ The system implements strict defensive validation before any uploaded file touch
    - Documents (PDF/DOCX): 25 MB
    - Audio: 50 MB
    - Video: 100 MB
+

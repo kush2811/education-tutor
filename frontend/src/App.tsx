@@ -180,7 +180,7 @@ export const App: React.FC = () => {
 
         const fallbackMsg = await api.addMessage(activeSessionId, {
           sender_role: 'assistant',
-          content: `### 🎓 Socratic Problem Guidance\n\nI received your inquiry:\n> ${content}\n\nLet's analyze this step-by-step:\n1. Identify the governing physical or mathematical law.\n2. List all known parameters and isolate target unknowns.\n3. Formulate your hypothesis before substituting numbers.`,
+          content: `### Tutor Guidance\n\nI received your inquiry:\n> ${content}\n\nLet's analyze this step-by-step:\n1. Identify the governing physical or mathematical principles.\n2. List all known parameters and isolate target unknowns.\n3. Formulate your hypothesis before substituting numbers.`,
           content_type: 'text',
         });
 

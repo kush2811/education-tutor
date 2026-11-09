@@ -147,3 +147,4 @@ Maintains registry of authoritative educational curricula.
 3. **Data Isolation & Security:**
    - Multi-tenant data segregation enforced at the ORM layer using `user_id` filters on all `Session` queries.
    - `ON DELETE CASCADE` ensures student account deletions purge all messages, sessions, and associated files without orphan data leakage.
+

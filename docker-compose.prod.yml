@@ -83,3 +83,4 @@ networks:
     internal: true
   edge_network:
     driver: bridge
+

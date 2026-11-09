@@ -74,3 +74,4 @@ The React frontend maintains a high-performance audio synchronization loop:
 - **Interactive Scrubber:** Dragging the progress bar seeks audio and immediately jumps visual highlight to the exact corresponding sentence.
 - **Speed Pitch Preservation:** Changing playback rate (`0.75x` to `2.0x`) maintains natural pitch without robotization.
 - **Browser Speech Fallback:** When offline or on mobile browsers without streaming support, the player seamlessly falls back to the Web Speech Synthesis API.
+

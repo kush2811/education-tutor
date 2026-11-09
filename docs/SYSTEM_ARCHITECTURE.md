@@ -151,3 +151,4 @@ sequenceDiagram
 - **Frontend:** React 18, Vite 5, TypeScript 5, Tailwind CSS, Lucide Icons, KaTeX, Highlight.js.
 - **Database:** PostgreSQL 16 (Production) / SQLite 3 (Development & Testing).
 - **Deployment:** Docker Multi-Stage, Nginx Reverse Proxy, Docker Compose, Gunicorn Process Manager.
+

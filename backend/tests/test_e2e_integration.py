@@ -78,7 +78,7 @@ class TestCompleteWorkflow:
         # 3. Pedagogical Tutoring & SymPy Verification
         assert data["sympy_verified"] is True
         assert data["sympy_result"] is not None
-        assert "# 🎓 Step-by-Step Educational Solution" in data["formatted_markdown"]
+        assert "Step-by-Step Educational Solution" in data["formatted_markdown"]
         assert "Step 1:" in data["formatted_markdown"]
         assert "Final Answer" in data["formatted_markdown"]
 

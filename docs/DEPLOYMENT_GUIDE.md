@@ -142,3 +142,4 @@ LOG_FILE_PATH=/app/storage/logs/tutor.log
 4. **Monitoring & Logging:**
    - Stream container stdout/stderr to **AWS CloudWatch Logs**.
    - Configure Sentry DSN in backend environment for real-time exception alerts.
+

@@ -281,3 +281,4 @@ Verifies database connectivity, vector index readiness, and background workers.
     "timestamp": "2026-11-09T10:00:00Z"
   }
   ```
+

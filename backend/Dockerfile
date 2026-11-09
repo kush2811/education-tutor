@@ -55,3 +55,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Launch production server with Gunicorn Uvicorn workers
 CMD ["gunicorn", "-c", "gunicorn_conf.py", "app.main:app"]
+
