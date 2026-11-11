@@ -48,6 +48,7 @@ class EducationalSpeechNormalizer:
             (r'\\approx', 'is approximately equal to'),
             (r'\\times', 'times'),
             (r'\\cdot', 'times'),
+            (r'\^\s*\\circ|\\circ', ' degrees'),
             (r'\\pm', 'plus or minus'),
             (r'\\mp', 'minus or plus'),
             (r'\\implies', 'implies that'),
@@ -152,12 +153,16 @@ class EducationalSpeechNormalizer:
         return text
 
     def normalize_code_blocks(self, text: str) -> str:
-        """Summarize programming code blocks in plain English rather than reciting punctuation."""
-        code_block_pattern = re.compile(r'```(?:[a-zA-Z0-9_]+)?\n(.*?)```', re.DOTALL)
+        """Summarize programming code blocks and diagram blocks in plain English rather than reciting syntax."""
+        code_block_pattern = re.compile(r'```([a-zA-Z0-9_]+)?\n(.*?)```', re.DOTALL)
 
         def replace_code(match: re.Match) -> str:
-            code = match.group(1).strip()
-            # Try to detect function name or purpose
+            lang = (match.group(1) or "").strip().lower()
+            code = match.group(2).strip()
+            if lang == "diagram":
+                diagram_name = code.replace('_', ' ')
+                return f" Refer to the {diagram_name} diagram shown on screen. "
+
             func_match = re.search(r'def\s+([a-zA-Z0-9_]+)\s*\(', code)
             class_match = re.search(r'class\s+([a-zA-Z0-9_]+)', code)
 
@@ -239,6 +244,9 @@ class EducationalSpeechNormalizer:
         text = re.sub(r'\*([^*]+)\*', r'\1', text)
         text = re.sub(r'`([^`]+)`', r'\1', text)
 
+        # 8b. Normalize any remaining standalone '=' signs into 'equals'
+        text = re.sub(r'\s*=\s*', ' equals ', text)
+
         # 9. Clean audit notice headers if present at the bottom
         text = re.sub(r'---\s*\n###?\s*🛡️ Answer Verification.*$', '', text, flags=re.DOTALL)
 
@@ -254,8 +262,9 @@ class EducationalSpeechNormalizer:
         Returns:
             List of (display_text_sentence, spoken_text_sentence)
         """
-        # Split on sentence boundaries and line breaks
-        raw_lines = original_text.split('\n')
+        # Pre-collapse multi-line code and diagram blocks before splitting on newlines
+        preprocessed = self.normalize_code_blocks(original_text)
+        raw_lines = preprocessed.split('\n')
         pairs: List[Tuple[str, str]] = []
 
         for line in raw_lines:

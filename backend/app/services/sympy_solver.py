@@ -27,8 +27,18 @@ class SymPyMathSolver:
         clean = expr_str.strip()
         # Strip outer delimiters $ or $$
         clean = re.sub(r'^\${1,2}|\${1,2}$', '', clean).strip()
-        # Strip leading English operational verbs if present (including colons e.g. "Solve for x:")
-        clean = re.sub(r'^(?:differentiate|derivative\s+of|find\s+the\s+derivative\s+of|integrate|integral\s+of|solve\s+for\s+\w+:?|solve:?|factor|expand|evaluate|calculate)\s*', '', clean, flags=re.IGNORECASE).strip()
+        # Strip leading English operational verbs/phrases if present (including colons)
+        clean = re.sub(
+            r'^(?:please\s+)?(?:find\s+the\s+derivative\s+of|differentiate|derivative\s+of|'
+            r'find\s+the\s+integral\s+of|integrate|integral\s+of|'
+            r'solve\s+(?:the\s+)?(?:quadratic\s+|linear\s+)?(?:equation|problem|expression)?\s*(?:for\s+\w+)?\s*:?|'
+            r'solve:?|factor|expand|evaluate|calculate)\s*',
+            '',
+            clean,
+            flags=re.IGNORECASE
+        ).strip()
+        # Strip trailing "with respect to x"
+        clean = re.sub(r'\s+with\s+respect\s+to\s+[a-zA-Z]\.?\s*$', '', clean, flags=re.IGNORECASE).strip()
         # Standardize LaTeX brackets
         clean = clean.replace(r'\[', '').replace(r'\]', '')
         # Replace LaTeX fractions \frac{a}{b} -> (a)/(b)
@@ -52,6 +62,8 @@ class SymPyMathSolver:
         """Route to specialized mathematical solver and return step-by-step derivation."""
         op = operation.lower().strip()
         cleaned_expr = self.clean_math_string(expression)
+        if op in ["differentiate", "derivative", "diff", "integrate", "integral", "limit", "factor", "expand"]:
+            cleaned_expr = re.sub(r'^(?:[a-zA-Z]\([a-zA-Z]\)|[a-zA-Z])\s*=\s*', '', cleaned_expr).strip()
 
         try:
             if op in ["solve", "algebra", "roots"]:

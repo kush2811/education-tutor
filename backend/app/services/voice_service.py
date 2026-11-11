@@ -13,6 +13,7 @@ from app.schemas.voice import (
     WordSegment
 )
 from app.services.speech_normalizer import speech_normalizer
+from app.core.config import settings
 from app.core.logging import logger
 
 STORAGE_AUDIO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "storage", "audio")
@@ -39,7 +40,8 @@ class EducationalVoiceService:
 
         full_spoken_script = " ".join(spoken for _, spoken in sentence_pairs)
 
-        # 2. Attempt Neural TTS with edge-tts (with 4.0s timeout to prevent hanging on slow network)
+        # 2. Attempt Neural TTS with edge-tts (fast timeout in testing, 15s for longer explanations in prod)
+        tts_timeout = 4.0 if settings.ENVIRONMENT == "testing" else 15.0
         try:
             return await asyncio.wait_for(
                 self._generate_with_edge_tts(
@@ -47,7 +49,7 @@ class EducationalVoiceService:
                     full_spoken_script=full_spoken_script,
                     sentence_pairs=sentence_pairs
                 ),
-                timeout=4.0
+                timeout=tts_timeout
             )
         except Exception as e:
             logger.warning(f"Neural Edge-TTS generation failed or timed out ({e}); falling back to client-aligned speech.")
@@ -58,83 +60,173 @@ class EducationalVoiceService:
                 error_msg=str(e)
             )
 
+    @staticmethod
+    def _clean_display_line(disp: str) -> str:
+        """Strip raw markdown prefixes while keeping readable display text."""
+        cleaned = re.sub(r'^#+\s*', '', disp.strip())
+        cleaned = re.sub(r'^>\s*', '', cleaned)
+        cleaned = re.sub(r'^\s*[\*\-]\s+', '', cleaned)
+        cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', cleaned)
+        return cleaned.strip() or disp.strip()
+
+    @staticmethod
+    def _align_word_boundaries(
+        sentence_pairs: List[Tuple[str, str]],
+        word_events: List[Dict[str, Any]],
+        include_words: bool,
+    ) -> Tuple[List[SentenceSegment], float]:
+        """Align Edge-TTS WordBoundary events to sentence_pairs token-by-token to prevent line drift."""
+        def _norm(tok: str) -> str:
+            return re.sub(r'[^a-z0-9]', '', tok.lower())
+
+        # Expand any multi-word WordBoundary chunks (e.g., "90 degrees", "3 squared") into individual word events
+        expanded_events: List[Dict[str, Any]] = []
+        for ev in word_events:
+            parts = ev.get("text", "").split()
+            if len(parts) <= 1:
+                expanded_events.append(ev)
+            else:
+                sub_dur = max(ev.get("duration", 0) // len(parts), 1)
+                for p_i, part in enumerate(parts):
+                    expanded_events.append({
+                        "text": part,
+                        "offset": ev["offset"] + p_i * sub_dur,
+                        "duration": sub_dur,
+                    })
+        word_events = expanded_events
+
+        segments: List[SentenceSegment] = []
+        cursor = 0
+        last_end = 0.0
+        total_evs = len(word_events)
+        total_alnum_words = sum(
+            1 for _, sp in sentence_pairs for tok in sp.split() if _norm(tok)
+        )
+        exact_bijection = (total_alnum_words == total_evs)
+
+        for idx, (disp_text, spoken_text) in enumerate(sentence_pairs):
+            raw_words = spoken_text.split()
+            word_segments: List[WordSegment] = []
+            sent_start: Optional[float] = None
+            sent_end: float = last_end
+
+            for w in raw_words:
+                w_norm = _norm(w)
+                if not w_norm or cursor >= total_evs:
+                    continue
+
+                match_idx = cursor
+                if not exact_bijection:
+                    cur_norm = _norm(word_events[cursor].get("text", ""))
+                    if cur_norm != w_norm and len(w_norm) >= 3:
+                        for probe in range(cursor + 1, min(cursor + 4, total_evs)):
+                            if _norm(word_events[probe].get("text", "")) == w_norm:
+                                match_idx = probe
+                                break
+
+                ev = word_events[match_idx]
+                w_start = round(ev["offset"] / 10_000_000.0, 3)
+                w_end = round((ev["offset"] + ev["duration"]) / 10_000_000.0, 3)
+                cursor = match_idx + 1
+
+                if not exact_bijection:
+                    accum_norm = _norm(ev.get("text", ""))
+                    while accum_norm and len(accum_norm) < len(w_norm) and cursor < total_evs:
+                        next_ev = word_events[cursor]
+                        next_norm = _norm(next_ev.get("text", ""))
+                        if next_norm and (accum_norm + next_norm) in w_norm:
+                            accum_norm += next_norm
+                            w_end = round((next_ev["offset"] + next_ev["duration"]) / 10_000_000.0, 3)
+                            cursor += 1
+                        else:
+                            break
+
+                w_end = max(w_end, round(w_start + 0.04, 3))
+                if sent_start is None:
+                    sent_start = w_start
+                sent_end = max(sent_end, w_end)
+
+                if include_words:
+                    word_segments.append(
+                        WordSegment(word=w, start_time=w_start, end_time=w_end)
+                    )
+
+            if sent_start is None:
+                sent_start = last_end
+                sent_end = round(last_end + max(len(raw_words) * 0.35, 0.3), 3)
+                if include_words:
+                    word_segments = EducationalVoiceService._subdivide_words(spoken_text, sent_start, sent_end)
+
+            sent_end = max(sent_end, round(sent_start + 0.1, 3))
+            last_end = sent_end
+
+            segments.append(
+                SentenceSegment(
+                    sentence_index=idx,
+                    display_text=EducationalVoiceService._clean_display_line(disp_text),
+                    spoken_text=spoken_text,
+                    start_time=sent_start,
+                    end_time=sent_end,
+                    words=word_segments,
+                )
+            )
+
+        return segments, last_end
+
     async def _generate_with_edge_tts(
         self,
         request: TTSVoiceRequest,
         full_spoken_script: str,
         sentence_pairs: List[Tuple[str, str]]
     ) -> TTSVoiceResponse:
-        """Call edge-tts, collect audio bytes, and capture exact neural SentenceBoundary events."""
+        """Call edge-tts with WordBoundary events and map exact neural timestamps to sentences and words."""
         import edge_tts
 
         voice = request.voice or self.default_voice
         rate = request.rate or "+0%"
         pitch = request.pitch or "+0Hz"
 
-        # Unique hash for audio caching
-        cache_key = f"{full_spoken_script}_{voice}_{rate}_{pitch}"
+        cache_key = f"wb_{full_spoken_script}_{voice}_{rate}_{pitch}"
         file_hash = hashlib.md5(cache_key.encode('utf-8')).hexdigest()
         audio_filename = f"{file_hash}.mp3"
         audio_filepath = os.path.join(STORAGE_AUDIO_DIR, audio_filename)
 
         audio_bytes = bytearray()
-        boundary_events: List[Dict[str, Any]] = []
+        word_events: List[Dict[str, Any]] = []
 
         comm = edge_tts.Communicate(
             text=full_spoken_script,
             voice=voice,
             rate=rate,
-            pitch=pitch
+            pitch=pitch,
+            boundary="WordBoundary",
         )
 
         async for chunk in comm.stream():
             if chunk["type"] == "audio":
                 audio_bytes.extend(chunk["data"])
-            elif chunk["type"] == "SentenceBoundary":
-                boundary_events.append(chunk)
+            elif chunk["type"] == "WordBoundary":
+                word_events.append(chunk)
 
-        # Write audio file to storage if not already cached
-        if not os.path.exists(audio_filepath) or os.path.getsize(audio_filepath) == 0:
+        if audio_bytes and (not os.path.exists(audio_filepath) or os.path.getsize(audio_filepath) == 0):
             with open(audio_filepath, "wb") as f:
                 f.write(audio_bytes)
 
-        # 3. Align sentence and word timestamps
-        sentence_segments: List[SentenceSegment] = []
-        total_duration = 0.0
-
-        if boundary_events and len(boundary_events) >= len(sentence_pairs):
-            # Map boundary events directly to our sentence pairs
-            for idx, (disp_text, spoken_text) in enumerate(sentence_pairs):
-                b_ev = boundary_events[idx]
-                # edge-tts offsets are in 100ns units (ticks)
-                start_sec = round(b_ev["offset"] / 10_000_000.0, 3)
-                dur_sec = round(b_ev["duration"] / 10_000_000.0, 3)
-                end_sec = round(start_sec + dur_sec, 3)
-
-                words = []
-                if request.include_word_segments:
-                    words = self._subdivide_words(spoken_text, start_sec, end_sec)
-
-                sentence_segments.append(
-                    SentenceSegment(
-                        sentence_index=idx,
-                        display_text=disp_text,
-                        spoken_text=spoken_text,
-                        start_time=start_sec,
-                        end_time=end_sec,
-                        words=words
-                    )
-                )
-                total_duration = max(total_duration, end_sec)
+        if word_events:
+            sentence_segments, total_duration = self._align_word_boundaries(
+                sentence_pairs=sentence_pairs,
+                word_events=word_events,
+                include_words=request.include_word_segments,
+            )
         else:
-            # Fallback alignment across the actual total duration
-            # Approximate total duration from boundary events or file size (128kbps = 16000 bytes/sec)
+            # Edge-TTS uses 48 kbps (~6000 bytes/sec) MP3 encoding
             estimated_dur = max(
-                len(audio_bytes) / 16000.0 if audio_bytes else 0.0,
+                len(audio_bytes) / 6000.0 if audio_bytes else 0.0,
                 len(full_spoken_script.split()) / 2.5
             )
+            cleaned_pairs = [(self._clean_display_line(d), s) for d, s in sentence_pairs]
             sentence_segments = self._proportional_sentence_alignment(
-                sentence_pairs=sentence_pairs,
+                sentence_pairs=cleaned_pairs,
                 total_duration=estimated_dur,
                 include_words=request.include_word_segments
             )
@@ -163,8 +255,9 @@ class EducationalVoiceService:
         words_count = max(len(full_spoken_script.split()), 1)
         total_duration = round(words_count / 2.5, 2)
 
+        cleaned_pairs = [(self._clean_display_line(d), s) for d, s in sentence_pairs]
         sentence_segments = self._proportional_sentence_alignment(
-            sentence_pairs=sentence_pairs,
+            sentence_pairs=cleaned_pairs,
             total_duration=total_duration,
             include_words=request.include_word_segments
         )
@@ -190,8 +283,8 @@ class EducationalVoiceService:
             error=f"Neural TTS offline ({error_msg}); client fallback enabled."
         )
 
+    @staticmethod
     def _subdivide_words(
-        self,
         spoken_text: str,
         start_time: float,
         end_time: float

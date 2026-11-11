@@ -8,6 +8,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { MathRenderer } from './MathRenderer';
+import { ConceptDiagram } from './ConceptDiagram';
 import { MessageCitation } from '../types';
 
 interface TutorResponseProps {
@@ -38,7 +39,44 @@ export const TutorResponse: React.FC<TutorResponseProps> = ({
   };
 
   /**
-   * Helper to parse markdown math delimiters ($...$, $$...$$) within text
+   * Helper to parse inline markdown formatting (**bold**, *italic*, `code`, [link](url))
+   */
+  const renderInlineFormatting = (text: string, keyPrefix: number) => {
+    const tokens = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g);
+    return tokens.map((tok, i) => {
+      if (tok.startsWith('**') && tok.endsWith('**') && tok.length > 4) {
+        return <strong key={`${keyPrefix}-${i}`} className="font-semibold text-slate-900">{tok.slice(2, -2)}</strong>;
+      }
+      if (tok.startsWith('*') && tok.endsWith('*') && tok.length > 2) {
+        return <em key={`${keyPrefix}-${i}`}>{tok.slice(1, -1)}</em>;
+      }
+      if (tok.startsWith('`') && tok.endsWith('`') && tok.length > 2) {
+        return (
+          <code key={`${keyPrefix}-${i}`} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-[0.85em]">
+            {tok.slice(1, -1)}
+          </code>
+        );
+      }
+      const linkMatch = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+      if (linkMatch) {
+        return (
+          <a
+            key={`${keyPrefix}-${i}`}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sky-600 hover:underline font-medium"
+          >
+            {linkMatch[1]}
+          </a>
+        );
+      }
+      return <span key={`${keyPrefix}-${i}`}>{tok}</span>;
+    });
+  };
+
+  /**
+   * Helper to parse markdown math delimiters ($...$, $$...$$) and inline markdown within text
    */
   const renderMathAndText = (text: string) => {
     const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^\$]+?\$)/g);
@@ -48,13 +86,13 @@ export const TutorResponse: React.FC<TutorResponseProps> = ({
       } else if (part.startsWith('$') && part.endsWith('$')) {
         return <MathRenderer key={idx} math={part.slice(1, -1).trim()} block={false} />;
       }
-      return <span key={idx}>{part}</span>;
+      return <React.Fragment key={idx}>{renderInlineFormatting(part, idx)}</React.Fragment>;
     });
   };
 
   /**
    * Structured Parser for Markdown blocks:
-   * - Code blocks: ```lang ... ```
+   * - Code blocks & diagrams: ```lang ... ```
    * - Tables: | col1 | col2 |
    * - Headings: #, ##, ###
    * - Bullet & Numbered lists: *, -, 1.
@@ -73,35 +111,40 @@ export const TutorResponse: React.FC<TutorResponseProps> = ({
     const flushCodeBlock = () => {
       const codeText = codeLines.join('\n');
       const currentIndex = codeBlockCount++;
-      elements.push(
-        <div key={`code-${currentIndex}`} className="my-3 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 shadow-md">
-          <div className="bg-slate-800 px-4 py-1.5 flex items-center justify-between text-xs text-slate-300 border-b border-slate-700">
-            <span className="flex items-center gap-1.5 font-mono text-[11px] text-sky-400">
-              <Terminal className="w-3.5 h-3.5" />
-              {codeLanguage || 'code'}
-            </span>
-            <button
-              onClick={() => handleCopyCode(codeText, currentIndex)}
-              className="flex items-center gap-1 text-[11px] hover:text-white transition-colors"
-            >
-              {copiedCodeIndex === currentIndex ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy code</span>
-                </>
-              )}
-            </button>
+
+      if (codeLanguage.trim().toLowerCase() === 'diagram') {
+        elements.push(<ConceptDiagram key={`diagram-${currentIndex}`} type={codeText} />);
+      } else {
+        elements.push(
+          <div key={`code-${currentIndex}`} className="my-3 rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 shadow-md">
+            <div className="bg-slate-800 px-4 py-1.5 flex items-center justify-between text-xs text-slate-300 border-b border-slate-700">
+              <span className="flex items-center gap-1.5 font-mono text-[11px] text-sky-400">
+                <Terminal className="w-3.5 h-3.5" />
+                {codeLanguage || 'code'}
+              </span>
+              <button
+                onClick={() => handleCopyCode(codeText, currentIndex)}
+                className="flex items-center gap-1 text-[11px] hover:text-white transition-colors"
+              >
+                {copiedCodeIndex === currentIndex ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy code</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+              <code>{codeText}</code>
+            </pre>
           </div>
-          <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
-            <code>{codeText}</code>
-          </pre>
-        </div>
-      );
+        );
+      }
       codeLines = [];
       inCodeBlock = false;
       codeLanguage = '';

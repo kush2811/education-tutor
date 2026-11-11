@@ -30,7 +30,6 @@ const AVAILABLE_VOICES = [
 const SPEED_OPTIONS = [0.75, 1.0, 1.25, 1.5, 2.0];
 
 export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }) => {
-  // Voice Generation & Audio State
   const [loading, setLoading] = useState(true);
   const [voiceData, setVoiceData] = useState<TTSVoiceResponse | null>(null);
   const [selectedVoice, setSelectedVoice] = useState('en-US-AriaNeural');
@@ -45,24 +44,51 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeSubtitleRef = useRef<HTMLDivElement | null>(null);
-  const browserUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const progressTimerRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const speechSessionRef = useRef<number>(0);
+  const voiceDataRef = useRef<TTSVoiceResponse | null>(null);
 
-  // 1. Fetch Audio & Synchronized Timestamps from Backend
+  useEffect(() => {
+    voiceDataRef.current = voiceData;
+  }, [voiceData]);
+
+  // Smooth auto-scroll ONLY when moving to a new line
+  useEffect(() => {
+    if (activeSubtitleRef.current) {
+      activeSubtitleRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [currentSentenceIndex]);
+
+  const stopAllPlayback = () => {
+    speechSessionRef.current += 1;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsPlaying(false);
+  };
+
+  // Fetch Audio & Synchronized Word Timestamps from Backend
   const loadSpeechData = async (voiceId: string) => {
+    stopAllPlayback();
     setLoading(true);
     setErrorMessage(null);
-    setIsPlaying(false);
     setCurrentTime(0);
     setCurrentSentenceIndex(0);
     setCurrentWordIndex(null);
 
     if (audioRef.current) {
-      audioRef.current.pause();
       audioRef.current.src = '';
-    }
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      audioRef.current = null;
     }
 
     try {
@@ -73,9 +99,9 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
       });
 
       setVoiceData(res);
+      voiceDataRef.current = res;
       setTotalDuration(res.duration_seconds || 10);
 
-      // If backend generated neural audio file
       if (res.audio_url && res.audio_format === 'mp3') {
         const fullAudioUrl = res.audio_url.startsWith('http')
           ? res.audio_url
@@ -91,24 +117,21 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
           }
         };
 
-        audio.ontimeupdate = () => {
-          handleAudioTimeUpdate(audio.currentTime, res.sentence_segments);
-        };
-
         audio.onended = () => {
+          if (rafRef.current) cancelAnimationFrame(rafRef.current);
           setIsPlaying(false);
-          setCurrentTime(totalDuration);
+          setCurrentTime(audio.duration || res.duration_seconds || 0);
           setCurrentWordIndex(null);
         };
 
         audio.onerror = () => {
-          console.warn('Audio streaming failed, switching to client-side speech fallback.');
-          setErrorMessage('Streaming audio encountered network interruption; switched to client voice.');
+          audioRef.current = null;
+          setErrorMessage('Audio file unavailable; using browser speech line-by-line.');
         };
       }
     } catch (err: any) {
       console.warn('Backend TTS call failed:', err);
-      setErrorMessage(err.message || 'Voice service offline; using client speech synthesis.');
+      setErrorMessage(err.message || 'Voice service offline; using browser speech synthesis.');
     } finally {
       setLoading(false);
     }
@@ -116,166 +139,223 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
 
   useEffect(() => {
     loadSpeechData(selectedVoice);
-
     return () => {
+      stopAllPlayback();
       if (audioRef.current) {
-        audioRef.current.pause();
         audioRef.current.src = '';
-      }
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      if (progressTimerRef.current) {
-        clearInterval(progressTimerRef.current);
       }
     };
   }, [textToSpeak, selectedVoice]);
 
-  // 2. Synchronize active sentence and word timestamps
-  const handleAudioTimeUpdate = (time: number, segments: SentenceSegment[]) => {
+  // Gap-tolerant sentence and word lookup for neural MP3 playback
+  const syncTimestampsFromAudioTime = (time: number, segments: SentenceSegment[]) => {
     setCurrentTime(time);
+    if (!segments || segments.length === 0) return;
 
-    // Find matching sentence
-    const sIdx = segments.findIndex(
-      (s) => time >= s.start_time && time <= s.end_time
-    );
-
-    if (sIdx !== -1) {
-      setCurrentSentenceIndex(sIdx);
-
-      // Find matching word if word segments are available
-      const currentSentence = segments[sIdx];
-      if (currentSentence && currentSentence.words && currentSentence.words.length > 0) {
-        const wIdx = currentSentence.words.findIndex(
-          (w) => time >= w.start_time && time <= w.end_time
-        );
-        setCurrentWordIndex(wIdx !== -1 ? wIdx : null);
+    // Select the active sentence whose start_time <= time (tolerant of inter-sentence pauses)
+    let sIdx = 0;
+    for (let i = 0; i < segments.length; i++) {
+      if (time + 0.04 >= segments[i].start_time) {
+        sIdx = i;
       } else {
-        setCurrentWordIndex(null);
+        break;
       }
-    } else if (segments.length > 0 && time > segments[segments.length - 1].end_time) {
-      setCurrentSentenceIndex(segments.length - 1);
-      setCurrentWordIndex(null);
     }
+    setCurrentSentenceIndex(sIdx);
 
-    // Auto-scroll the active subtitle into view
-    if (activeSubtitleRef.current) {
-      activeSubtitleRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
-      });
+    const seg = segments[sIdx];
+    if (seg && seg.words && seg.words.length > 0) {
+      // If before the first word or past the sentence end, highlight closest boundary appropriately
+      let matchedWordIdx: number | null = null;
+      for (let j = 0; j < seg.words.length; j++) {
+        const w = seg.words[j];
+        if (time >= w.start_time - 0.03 && time <= w.end_time + 0.04) {
+          matchedWordIdx = j;
+          break;
+        }
+        if (time >= w.start_time) {
+          matchedWordIdx = j;
+        }
+      }
+      if (time > seg.end_time + 0.15) {
+        matchedWordIdx = null;
+      }
+      setCurrentWordIndex(matchedWordIdx);
+    } else {
+      setCurrentWordIndex(null);
     }
   };
 
-  // 3. Browser Speech Synthesis Fallback Handler
-  const playWithBrowserSpeech = (startFromIdx = 0) => {
+  // High-precision 60fps synchronization loop while MP3 is playing
+  useEffect(() => {
+    if (!isPlaying || !audioRef.current) {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      return;
+    }
+
+    const tick = () => {
+      const audio = audioRef.current;
+      const segs = voiceDataRef.current?.sentence_segments || [];
+      if (audio && !audio.paused) {
+        syncTimestampsFromAudioTime(audio.currentTime, segs);
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [isPlaying]);
+
+  // Line-by-line Browser Speech Fallback with true utterance.onboundary tracking
+  const speakLineByLine = (startIdx: number, speedOverride?: number) => {
     if (!('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
 
-    const segments = voiceData?.sentence_segments || [];
-    const textChunk = segments
-      .slice(startFromIdx)
-      .map((s) => s.spoken_text || s.display_text)
-      .join(' ');
+    const segments = voiceDataRef.current?.sentence_segments || [];
+    const activeSpeed = speedOverride ?? playbackSpeed;
+    const sessionToken = ++speechSessionRef.current;
 
-    const utterance = new SpeechSynthesisUtterance(textChunk || textToSpeak);
-    utterance.rate = playbackSpeed;
-    browserUtteranceRef.current = utterance;
+    if (segments.length === 0) {
+      const utt = new SpeechSynthesisUtterance(textToSpeak);
+      utt.rate = activeSpeed;
+      utt.onend = () => {
+        if (speechSessionRef.current === sessionToken) setIsPlaying(false);
+      };
+      setIsPlaying(true);
+      window.speechSynthesis.speak(utt);
+      return;
+    }
 
-    utterance.onend = () => {
-      setIsPlaying(false);
-      setCurrentTime(totalDuration);
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    const speakNext = (idx: number) => {
+      if (speechSessionRef.current !== sessionToken) return;
+      if (idx >= segments.length) {
+        setIsPlaying(false);
+        setCurrentWordIndex(null);
+        setCurrentTime(totalDuration);
+        return;
+      }
+
+      const seg = segments[idx];
+      const spokenLine = seg.spoken_text || seg.display_text;
+      const utt = new SpeechSynthesisUtterance(spokenLine);
+      utt.rate = activeSpeed;
+
+      // Precompute character offsets of each word in spokenLine for accurate boundary tracking
+      const wordOffsets: { start: number; end: number }[] = [];
+      let searchFrom = 0;
+      const splitWords = spokenLine.split(/\s+/).filter(Boolean);
+      for (const w of splitWords) {
+        const pos = spokenLine.indexOf(w, searchFrom);
+        if (pos !== -1) {
+          wordOffsets.push({ start: pos, end: pos + w.length });
+          searchFrom = pos + w.length;
+        }
+      }
+
+      utt.onstart = () => {
+        if (speechSessionRef.current !== sessionToken) return;
+        setCurrentSentenceIndex(idx);
+        setCurrentWordIndex(0);
+        setCurrentTime(seg.start_time);
+      };
+
+      utt.onboundary = (event: SpeechSynthesisEvent) => {
+        if (speechSessionRef.current !== sessionToken) return;
+        if (event.name === 'word' || typeof event.charIndex === 'number') {
+          const ch = event.charIndex;
+          const wIdx = wordOffsets.findIndex((o) => ch >= o.start && ch <= o.end);
+          if (wIdx !== -1) {
+            setCurrentWordIndex(wIdx);
+            if (seg.words && seg.words[wIdx]) {
+              setCurrentTime(seg.words[wIdx].start_time);
+            }
+          }
+        }
+      };
+
+      utt.onend = () => {
+        if (speechSessionRef.current !== sessionToken) return;
+        setCurrentTime(seg.end_time);
+        speakNext(idx + 1);
+      };
+
+      utt.onerror = () => {
+        if (speechSessionRef.current === sessionToken) {
+          setIsPlaying(false);
+        }
+      };
+
+      window.speechSynthesis.speak(utt);
     };
 
-    window.speechSynthesis.speak(utterance);
     setIsPlaying(true);
-
-    // Proportional progress timer for fallback mode
-    const intervalMs = 250;
-    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-
-    progressTimerRef.current = window.setInterval(() => {
-      setCurrentTime((prev) => {
-        const next = prev + (intervalMs / 1000) * playbackSpeed;
-        if (segments.length > 0) {
-          handleAudioTimeUpdate(next, segments);
-        }
-        if (next >= totalDuration) {
-          if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-          setIsPlaying(false);
-          return totalDuration;
-        }
-        return next;
-      });
-    }, intervalMs);
+    speakNext(Math.max(0, Math.min(startIdx, segments.length - 1)));
   };
 
-  // 4. Playback Controls
+  // Playback Controls
   const togglePlayPause = () => {
     if (isTextOnlyMode) {
       setIsTextOnlyMode(false);
     }
 
     if (isPlaying) {
-      // Pause
-      if (audioRef.current && audioRef.current.src) {
-        audioRef.current.pause();
-      } else if ('speechSynthesis' in window) {
-        window.speechSynthesis.pause();
-      }
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-      setIsPlaying(false);
+      stopAllPlayback();
+      return;
+    }
+
+    if (audioRef.current && audioRef.current.src) {
+      audioRef.current.playbackRate = playbackSpeed;
+      audioRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          audioRef.current = null;
+          speakLineByLine(currentSentenceIndex);
+        });
     } else {
-      // Resume / Play
-      if (audioRef.current && audioRef.current.src) {
-        audioRef.current
-          .play()
-          .then(() => setIsPlaying(true))
-          .catch((err) => {
-            console.warn('Audio play failed, falling back to browser speech:', err);
-            playWithBrowserSpeech(currentSentenceIndex);
-          });
-      } else {
-        if ('speechSynthesis' in window && window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
-          setIsPlaying(true);
-        } else {
-          playWithBrowserSpeech(currentSentenceIndex);
-        }
-      }
+      speakLineByLine(currentSentenceIndex);
     }
   };
 
   const handleReplay = () => {
+    stopAllPlayback();
     setCurrentTime(0);
     setCurrentSentenceIndex(0);
     setCurrentWordIndex(null);
 
     if (audioRef.current && audioRef.current.src) {
       audioRef.current.currentTime = 0;
+      audioRef.current.playbackRate = playbackSpeed;
       audioRef.current
         .play()
         .then(() => setIsPlaying(true))
-        .catch(() => playWithBrowserSpeech(0));
+        .catch(() => speakLineByLine(0));
     } else {
-      playWithBrowserSpeech(0);
+      speakLineByLine(0);
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const targetTime = Number(e.target.value);
-    setCurrentTime(targetTime);
-
     const segments = voiceData?.sentence_segments || [];
-    handleAudioTimeUpdate(targetTime, segments);
+    syncTimestampsFromAudioTime(targetTime, segments);
 
     if (audioRef.current && audioRef.current.src) {
       audioRef.current.currentTime = targetTime;
     } else if (isPlaying) {
-      // Re-trigger browser speech from matching sentence
-      const targetIdx = segments.findIndex((s) => targetTime >= s.start_time && targetTime <= s.end_time);
-      playWithBrowserSpeech(targetIdx !== -1 ? targetIdx : 0);
+      let targetIdx = 0;
+      for (let i = 0; i < segments.length; i++) {
+        if (targetTime >= segments[i].start_time) targetIdx = i;
+      }
+      speakLineByLine(targetIdx);
     }
   };
 
@@ -286,25 +366,28 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
     const targetTime = segments[idx].start_time;
     setCurrentTime(targetTime);
     setCurrentSentenceIndex(idx);
-    setCurrentWordIndex(null);
+    setCurrentWordIndex(0);
 
     if (audioRef.current && audioRef.current.src) {
       audioRef.current.currentTime = targetTime;
+      audioRef.current.playbackRate = playbackSpeed;
       if (!isPlaying) {
-        audioRef.current.play().then(() => setIsPlaying(true));
+        audioRef.current
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch(() => speakLineByLine(idx));
       }
     } else {
-      playWithBrowserSpeech(idx);
+      speakLineByLine(idx);
     }
   };
 
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
-    if (audioRef.current) {
+    if (audioRef.current && audioRef.current.src) {
       audioRef.current.playbackRate = speed;
-    }
-    if (isPlaying && (!audioRef.current || !audioRef.current.src)) {
-      playWithBrowserSpeech(currentSentenceIndex);
+    } else if (isPlaying) {
+      speakLineByLine(currentSentenceIndex, speed);
     }
   };
 
@@ -317,7 +400,7 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
   const segments = voiceData?.sentence_segments || [];
 
   return (
-    <div className="bg-slate-900 text-white border-t border-slate-800 p-4 shadow-2xl relative animate-in slide-in-from-bottom-3 duration-200">
+    <div className="bg-slate-900 text-white border-t border-slate-800 p-4 shadow-2xl relative z-20">
       <div className="max-w-4xl mx-auto flex flex-col gap-3">
         {/* Header Bar */}
         <div className="flex items-center justify-between">
@@ -327,21 +410,20 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
             </div>
             <div>
               <span className="text-xs font-bold text-sky-400 uppercase tracking-wider block">
-                Conversational Voice Tutor
+                Voice Reader
               </span>
               <span className="text-[10px] text-slate-400">
                 {voiceData?.alignment_method === 'neural_speech_timestamps'
-                  ? 'Neural Edge-TTS with Aligned Subtitles'
-                  : 'Client-Synchronized Audio Subtitles'}
+                  ? 'Neural Voice with Word-by-Word Subtitles'
+                  : 'Line-by-Line Synchronized Speech'}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Text-Only Mode Toggle */}
             <button
               onClick={() => {
-                if (isPlaying) togglePlayPause();
+                if (isPlaying) stopAllPlayback();
                 setIsTextOnlyMode(!isTextOnlyMode);
               }}
               className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
@@ -349,18 +431,16 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
               }`}
-              title="Toggle reading mode without audio"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>{isTextOnlyMode ? 'Exit Text-Only' : 'Text-Only Mode'}</span>
+              <span>{isTextOnlyMode ? 'Exit Text-Only' : 'Text-Only'}</span>
             </button>
 
-            {/* Voice Selector */}
             <select
               value={selectedVoice}
               onChange={(e) => setSelectedVoice(e.target.value)}
               className="bg-slate-800 text-slate-200 text-xs rounded-lg px-2 py-1 border border-slate-700 outline-none focus:border-sky-500"
-              title="Select AI Tutor Voice"
+              title="Select Voice"
             >
               {AVAILABLE_VOICES.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -369,22 +449,19 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
               ))}
             </select>
 
-            {/* Close Button */}
             <button
               onClick={() => {
-                if (audioRef.current) audioRef.current.pause();
-                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                stopAllPlayback();
                 onClose();
               }}
               className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-              title="Close voice interface"
+              title="Close voice reader"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Error / Fallback Banner if any */}
         {errorMessage && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs text-amber-300">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -392,67 +469,54 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
           </div>
         )}
 
-        {/* Loading State */}
         {loading ? (
           <div className="bg-slate-800/80 rounded-2xl p-6 border border-slate-700/80 flex items-center justify-center gap-3">
             <Loader2 className="w-5 h-5 text-sky-400 animate-spin" />
             <span className="text-xs text-slate-300 font-medium">
-              Generating natural voice audio and calculating synchronized word timestamps...
+              Preparing audio and aligning line-by-line timestamps...
             </span>
           </div>
         ) : isTextOnlyMode ? (
-          /* Text-Only Reading Mode Display */
           <div className="bg-slate-800/80 rounded-2xl p-4 border border-slate-700/80 max-h-48 overflow-y-auto">
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-700/60">
-              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-sky-400" />
-                Text-Only Mode (Read at your own pace)
-              </span>
-              <button
-                onClick={() => setIsTextOnlyMode(false)}
-                className="text-[10px] text-sky-400 hover:underline"
-              >
-                Resume Voice Audio
-              </button>
-            </div>
             <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{textToSpeak}</p>
           </div>
         ) : (
-          /* Active Subtitle Highlighting Card */
-          <div className="bg-slate-800/90 rounded-2xl p-4 border border-slate-700/80 max-h-36 overflow-y-auto shadow-inner">
+          /* Synchronized Line-by-Line Subtitle Card */
+          <div className="bg-slate-800/90 rounded-2xl p-4 border border-slate-700/80 max-h-40 overflow-y-auto shadow-inner">
             <div className="flex flex-col gap-2">
               {segments.length > 0 ? (
                 segments.map((seg, idx) => {
                   const isCurrent = idx === currentSentenceIndex;
+                  const displayWords =
+                    seg.words && seg.words.length > 0
+                      ? seg.words.map((w) => w.word)
+                      : (seg.spoken_text || seg.display_text).split(/\s+/).filter(Boolean);
+
                   return (
                     <div
                       key={idx}
                       ref={isCurrent ? activeSubtitleRef : null}
                       onClick={() => handleSentenceClick(idx)}
-                      className={`text-xs leading-relaxed transition-all rounded-xl p-2 cursor-pointer ${
+                      className={`text-xs leading-relaxed transition-colors rounded-xl p-2 cursor-pointer ${
                         isCurrent
-                          ? 'bg-sky-500/20 text-white font-medium border-l-4 border-sky-400 shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                          ? 'bg-sky-500/20 text-white font-medium border-l-4 border-sky-400'
+                          : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
-                      {isCurrent && seg.words && seg.words.length > 0 ? (
-                        /* Word-Level Highlighting within active sentence */
+                      {isCurrent && displayWords.length > 0 ? (
                         <span>
-                          {seg.words.map((w, wIdx) => {
-                            const isCurrentWord = wIdx === currentWordIndex;
-                            return (
-                              <span
-                                key={wIdx}
-                                className={`transition-all rounded px-0.5 ${
-                                  isCurrentWord
-                                    ? 'bg-amber-400 text-slate-950 font-bold shadow-xs'
-                                    : ''
-                                }`}
-                              >
-                                {w.word}{' '}
-                              </span>
-                            );
-                          })}
+                          {displayWords.map((wordText, wIdx) => (
+                            <span
+                              key={wIdx}
+                              className={`rounded px-0.5 transition-colors ${
+                                wIdx === currentWordIndex
+                                  ? 'bg-amber-400 text-slate-950 font-bold'
+                                  : ''
+                              }`}
+                            >
+                              {wordText}{' '}
+                            </span>
+                          ))}
                         </span>
                       ) : (
                         <span>{seg.display_text}</span>
@@ -467,10 +531,9 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
           </div>
         )}
 
-        {/* Audio Controls & Timeline Scrubber */}
-        {!isTextOnlyMode && (
+        {/* Audio Scrubber & Playback Controls */}
+        {!isTextOnlyMode && !loading && (
           <div className="flex flex-col gap-2 bg-slate-800/50 rounded-2xl p-3 border border-slate-700/50">
-            {/* Timeline slider */}
             <div className="flex items-center gap-3">
               <span className="text-[11px] font-mono text-slate-400 w-10 text-right">
                 {formatTime(currentTime)}
@@ -481,10 +544,10 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
                 min={0}
                 max={totalDuration || 10}
                 step={0.1}
-                value={currentTime}
+                value={Math.min(currentTime, totalDuration || 10)}
                 onChange={handleSeek}
                 className="flex-1 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-400"
-                title="Seek audio position"
+                title="Seek position"
               />
 
               <span className="text-[11px] font-mono text-slate-400 w-10">
@@ -492,57 +555,45 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
               </span>
             </div>
 
-            {/* Playback Controls & Speed */}
             <div className="flex items-center justify-between pt-1">
               <div className="flex items-center gap-2">
-                {/* Previous Sentence */}
                 <button
-                  onClick={() => {
-                    if (currentSentenceIndex > 0) {
-                      handleSentenceClick(currentSentenceIndex - 1);
-                    }
-                  }}
+                  onClick={() => currentSentenceIndex > 0 && handleSentenceClick(currentSentenceIndex - 1)}
                   disabled={currentSentenceIndex <= 0}
                   className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30 rounded-lg hover:bg-slate-700 transition-colors"
-                  title="Previous sentence"
+                  title="Previous line"
                 >
                   <SkipBack className="w-4 h-4" />
                 </button>
 
-                {/* Play/Pause Button */}
                 <button
                   onClick={togglePlayPause}
                   className="p-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold transition-all shadow-md shadow-sky-500/20 active:scale-95"
-                  title={isPlaying ? 'Pause audio' : 'Play audio'}
+                  title={isPlaying ? 'Pause' : 'Play'}
                 >
                   {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
                 </button>
 
-                {/* Next Sentence */}
                 <button
-                  onClick={() => {
-                    if (currentSentenceIndex < segments.length - 1) {
-                      handleSentenceClick(currentSentenceIndex + 1);
-                    }
-                  }}
+                  onClick={() =>
+                    currentSentenceIndex < segments.length - 1 && handleSentenceClick(currentSentenceIndex + 1)
+                  }
                   disabled={currentSentenceIndex >= segments.length - 1}
                   className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30 rounded-lg hover:bg-slate-700 transition-colors"
-                  title="Next sentence"
+                  title="Next line"
                 >
                   <SkipForward className="w-4 h-4" />
                 </button>
 
-                {/* Replay */}
                 <button
                   onClick={handleReplay}
                   className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition-colors"
-                  title="Replay from start"
+                  title="Replay"
                 >
                   <RotateCcw className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Speed Controls */}
               <div className="flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-700/50">
                 <Gauge className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
                 {SPEED_OPTIONS.map((speed) => (
