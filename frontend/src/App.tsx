@@ -204,7 +204,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="fixed inset-0 flex flex-col bg-white overflow-hidden">
       {/* Single Minimal Header */}
       <Header
         currentUser={currentUser}
@@ -217,7 +217,7 @@ export const App: React.FC = () => {
       />
 
       {/* ChatGPT-style Workspace: History Sidebar + Direct Chat */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         <SessionList
           sessions={sessions}
           activeSessionId={activeSessionId}
@@ -231,7 +231,7 @@ export const App: React.FC = () => {
           onDeleteSession={handleDeleteSession}
         />
 
-        <main className="flex-1 flex flex-col relative overflow-hidden">
+        <main className="flex-1 flex flex-col min-h-0 min-w-0 relative overflow-hidden bg-white">
           <ChatInterface
             session={activeSession}
             onSendMessage={handleSendMessage}

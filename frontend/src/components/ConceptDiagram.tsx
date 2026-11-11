@@ -9,7 +9,7 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   if (key === 'right_triangle') {
     return (
-      <div className="my-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="my-2 max-w-[270px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
         <svg viewBox="0 0 320 210" className="w-full h-auto" role="img" aria-label="Right-angled triangle showing a, b, and hypotenuse c">
           <polygon
             points="60,35 60,155 255,155"
@@ -61,7 +61,7 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   if (key === 'quadratic_parabola') {
     return (
-      <div className="my-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="my-2 max-w-[270px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
         <svg viewBox="0 0 320 200" className="w-full h-auto" role="img" aria-label="Parabola graph showing roots on x-axis">
           {/* Axes */}
           <line x1="25" y1="135" x2="295" y2="135" stroke="#94a3b8" strokeWidth="1.5" />
@@ -96,7 +96,7 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   if (key === 'conditional_probability_venn') {
     return (
-      <div className="my-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="my-2 max-w-[270px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
         <svg viewBox="0 0 320 180" className="w-full h-auto" role="img" aria-label="Venn diagram of conditional probability P(A|B)">
           <rect x="15" y="15" width="290" height="150" rx="12" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
           <text x="26" y="34" fontSize="11" fill="#64748b" fontWeight="600">Sample Space S</text>
@@ -119,7 +119,7 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   if (key === 'force_acceleration') {
     return (
-      <div className="my-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="my-2 max-w-[270px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
         <svg viewBox="0 0 320 150" className="w-full h-auto" role="img" aria-label="Force acting on mass m producing acceleration a">
           <line x1="20" y1="115" x2="300" y2="115" stroke="#94a3b8" strokeWidth="2" />
           <rect x="115" y="55" width="70" height="60" rx="6" fill="#e0f2fe" stroke="#0284c7" strokeWidth="2" />
@@ -141,7 +141,7 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   if (key === 'ohms_law_circuit') {
     return (
-      <div className="my-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      <div className="my-2 max-w-[270px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
         <svg viewBox="0 0 320 160" className="w-full h-auto" role="img" aria-label="Simple circuit with voltage V, current I, and resistor R">
           {/* Circuit Loop */}
           <rect x="65" y="35" width="190" height="90" rx="6" fill="none" stroke="#334155" strokeWidth="2" />
@@ -172,3 +172,4 @@ export const ConceptDiagram: React.FC<ConceptDiagramProps> = ({ type }) => {
 
   return null;
 };
+

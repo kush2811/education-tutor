@@ -255,9 +255,9 @@ export const TutorResponse: React.FC<TutorResponseProps> = ({
           </li>
         );
       }
-      // Empty lines
+      // Empty lines (headings & paragraphs manage their own vertical margins)
       else if (!line.trim()) {
-        elements.push(<div key={i} className="h-2" />);
+        continue;
       }
       // Standard Paragraph
       else {

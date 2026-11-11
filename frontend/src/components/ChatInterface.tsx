@@ -37,17 +37,42 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [attachedPreviewUrl, setAttachedPreviewUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const latestMessageRef = useRef<HTMLDivElement | null>(null);
+  const prevMsgCountRef = useRef<number>(0);
+  const prevSessionIdRef = useRef<string | null>(null);
   const hiddenFileInputRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
-  }, [session?.messages, sending, pendingUserText]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const currentMsgs = session?.messages || [];
+    const currentId = session?.id || null;
+    const isNewSession = currentId !== prevSessionIdRef.current;
+    const msgAdded = currentMsgs.length > prevMsgCountRef.current;
+
+    prevSessionIdRef.current = currentId;
+    prevMsgCountRef.current = currentMsgs.length;
+
+    if (pendingUserText || sending) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+
+    if ((msgAdded || isNewSession) && latestMessageRef.current) {
+      // Position the start of the latest AI response near the top of the scroll area so tall answers are never cut off
+      const lastMsg = currentMsgs[currentMsgs.length - 1];
+      if (lastMsg?.sender_role === 'assistant') {
+        const targetTop = Math.max(0, latestMessageRef.current.offsetTop - 20);
+        container.scrollTo({ top: targetTop, behavior: isNewSession ? 'auto' : 'smooth' });
+        return;
+      }
+    }
+
+    container.scrollTo({ top: container.scrollHeight, behavior: isNewSession ? 'auto' : 'smooth' });
+  }, [session?.id, session?.messages?.length, sending, pendingUserText]);
 
   const handleToggleRecord = () => {
     if (isRecording && recognitionRef.current) {
@@ -163,10 +188,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const isEmptyChat = messages.length === 0 && !pendingUserText;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
       {/* Error Alert Banner */}
       {errorMessage && (
-        <div className="bg-rose-50 border-b border-rose-200 px-6 py-2.5 text-xs text-rose-700 flex items-center justify-between">
+        <div className="shrink-0 bg-rose-50 border-b border-rose-200 px-6 py-2.5 text-xs text-rose-700 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
@@ -181,9 +206,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       )}
 
       {/* Main Message Stream */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6">
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6">
         {isEmptyChat ? (
-          <div className="h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto py-12">
+          <div className="min-h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto py-8">
             <div className="w-12 h-12 rounded-2xl bg-sky-600 text-white flex items-center justify-center mb-4 shadow-sm">
               <GraduationCap className="w-6 h-6" />
             </div>
@@ -195,12 +220,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </p>
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto py-6 space-y-6">
-            {messages.map((msg) => {
+          <div className="max-w-3xl mx-auto py-5 space-y-5">
+            {messages.map((msg, idx) => {
               const isUser = msg.sender_role === 'user';
+              const isLatest = idx === messages.length - 1;
               return (
                 <div
                   key={msg.id}
+                  ref={isLatest ? latestMessageRef : null}
                   className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   {!isUser && (
@@ -261,13 +288,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               </div>
             )}
 
-            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
       {/* Centered Composer Input Bar */}
-      <div className="bg-white px-4 pb-4 pt-2">
+      <div className="shrink-0 bg-white border-t border-slate-100 px-4 pb-4 pt-3">
         <div className="max-w-3xl mx-auto">
           {/* Attached File Preview */}
           {attachedFile && (

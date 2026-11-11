@@ -46,7 +46,7 @@ export const SessionList: React.FC<SessionListProps> = ({
   };
 
   return (
-    <aside className="w-64 sm:w-72 border-r border-slate-200 bg-slate-50/70 flex flex-col h-full shrink-0">
+    <aside className="w-64 sm:w-72 border-r border-slate-200 bg-slate-50/70 flex flex-col min-h-0 h-full shrink-0">
       <div className="p-3">
         <button
           onClick={onNewChat}
