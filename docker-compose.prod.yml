@@ -36,7 +36,9 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-tutor_admin}:${POSTGRES_PASSWORD:-ChangeMeSecurePassword2026!}@postgres:5432/${POSTGRES_DB:-ai_tutor_prod}
       - UPLOAD_DIR=/app/storage/uploads
       - VECTOR_STORE_DIR=/app/storage/vector_store
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env before starting production}
       - CORS_ORIGINS=${CORS_ORIGINS:-https://tutor.example.com}
       - SENTRY_DSN=${SENTRY_DSN:-}
       - ENABLE_RATE_LIMITER=True

@@ -6,7 +6,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { VoicePlayer } from './components/VoicePlayer';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { api, tokenStorage } from './services/api';
+import { api, tokenStorage, getGuestStudentId } from './services/api';
 import { StudySession, User } from './types';
 
 type AppRoute = 'tutor' | 'login' | 'register';
@@ -46,7 +46,7 @@ export const App: React.FC = () => {
   // Load chat history whenever authentication state changes
   const loadSessions = async () => {
     try {
-      const data = await api.listSessions(currentUser?.id || 'default_student');
+      const data = await api.listSessions(currentUser?.id || getGuestStudentId());
       setSessions(data);
     } catch (err) {
       console.warn('Could not load chat history:', err);
@@ -124,7 +124,7 @@ export const App: React.FC = () => {
       const created = await api.createSession({
         title: chatTitle,
         subject: 'General STEM',
-        student_id: currentUser?.id || 'default_student',
+        student_id: currentUser?.id || getGuestStudentId(),
       });
       targetSessionId = created.id;
       setSessions((prev) => [created, ...prev]);

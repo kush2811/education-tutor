@@ -12,7 +12,7 @@ import {
   SkipForward,
   SkipBack,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, API_ORIGIN } from '../services/api';
 import { TTSVoiceResponse, SentenceSegment } from '../types';
 
 interface VoicePlayerProps {
@@ -105,7 +105,7 @@ export const VoicePlayer: React.FC<VoicePlayerProps> = ({ textToSpeak, onClose }
       if (res.audio_url && res.audio_format === 'mp3') {
         const fullAudioUrl = res.audio_url.startsWith('http')
           ? res.audio_url
-          : `http://127.0.0.1:8000${res.audio_url}`;
+          : `${API_ORIGIN}${res.audio_url}`;
 
         const audio = new Audio(fullAudioUrl);
         audio.playbackRate = playbackSpeed;

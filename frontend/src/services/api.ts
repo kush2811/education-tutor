@@ -1,9 +1,35 @@
 import { HealthStatus, StudySession, Message, User, TokenResponse, UploadedFileResponse } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1';
+const DEFAULT_API_BASE = import.meta.env.DEV ? 'http://127.0.0.1:8000/api/v1' : '/api/v1';
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_BASE).replace(/\/+$/, '');
 
-// Token storage key
+export const API_ORIGIN = (() => {
+  if (/^https?:\/\//i.test(API_BASE_URL)) {
+    try {
+      return new URL(API_BASE_URL).origin;
+    } catch {
+      return '';
+    }
+  }
+  return '';
+})();
+
+// Token & per-browser guest storage keys
 const TOKEN_KEY = 'ai_tutor_auth_token';
+const GUEST_ID_KEY = 'ai_tutor_guest_id';
+
+export const getGuestStudentId = (): string => {
+  let id = localStorage.getItem(GUEST_ID_KEY);
+  if (!id) {
+    const randomPart =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    id = `guest_${randomPart}`;
+    localStorage.setItem(GUEST_ID_KEY, id);
+  }
+  return id;
+};
 
 export const tokenStorage = {
   get: () => localStorage.getItem(TOKEN_KEY),
