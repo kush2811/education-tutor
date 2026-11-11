@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Send,
-  Sparkles,
   Mic,
   MicOff,
   Paperclip,
@@ -14,35 +13,33 @@ import {
   Music,
   AlertCircle,
   Loader2,
+  GraduationCap,
 } from 'lucide-react';
-import { StudySession, MessageCitation } from '../types';
+import { StudySession } from '../types';
 import { TutorResponse } from './TutorResponse';
 
 interface ChatInterfaceProps {
   session: StudySession | null;
-  onSendMessage: (content: string, contentType?: string, citations?: MessageCitation[]) => Promise<void>;
-  onOpenUpload: () => void;
+  onSendMessage: (content: string, contentType?: string, attachedFile?: File) => Promise<void>;
   onPlayVoice: (text: string) => void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   session,
   onSendMessage,
-  onOpenUpload,
   onPlayVoice,
 }) => {
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachedPreviewUrl, setAttachedPreviewUrl] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const hiddenFileInputRef = useRef<HTMLInputElement | null>(null);
-  const recordingTimerRef = useRef<number | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,24 +47,51 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [session?.messages, sending]);
+  }, [session?.messages, sending, pendingUserText]);
 
-  // Handle Voice Recording Simulation (functional timer + mock audio capture)
   const handleToggleRecord = () => {
-    if (isRecording) {
-      // Stop recording
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
       setIsRecording(false);
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      // Append audio inquiry prompt
-      setInputText((prev) => (prev ? `${prev} [Voice Question: ~${recordingSeconds}s]` : `[Voice Question: ~${recordingSeconds}s]`));
-      setRecordingSeconds(0);
-    } else {
-      // Start recording
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setErrorMessage('Voice dictation is not supported in this browser. You can attach an audio file or type directly.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results?.[0]?.[0]?.transcript;
+        if (transcript) {
+          setInputText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        setErrorMessage(`Microphone error: ${event.error || 'Permission denied'}`);
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      setErrorMessage(null);
       setIsRecording(true);
-      setRecordingSeconds(0);
-      recordingTimerRef.current = window.setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
-      }, 1000);
+      recognition.start();
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Could not start voice recording.');
+      setIsRecording(false);
     }
   };
 
@@ -84,50 +108,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleRemoveAttachment = () => {
     setAttachedFile(null);
     setAttachedPreviewUrl(null);
-    setUploadProgress(null);
+    if (hiddenFileInputRef.current) {
+      hiddenFileInputRef.current.value = '';
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!inputText.trim() && !attachedFile) || sending || !session) return;
+    if ((!inputText.trim() && !attachedFile) || sending) return;
+
+    const currentFile = attachedFile;
+    let finalContent = inputText.trim();
+    let contentType = 'text';
+
+    if (currentFile) {
+      contentType = currentFile.type.startsWith('image/')
+        ? 'image'
+        : currentFile.type.includes('pdf')
+        ? 'pdf'
+        : currentFile.type.startsWith('video/')
+        ? 'video'
+        : currentFile.type.startsWith('audio/')
+        ? 'audio'
+        : 'docx';
+
+      const fileNote = `[Attached ${contentType.toUpperCase()}: ${currentFile.name}]`;
+      finalContent = finalContent ? `${fileNote}\n${finalContent}` : fileNote;
+    }
 
     setSending(true);
     setErrorMessage(null);
+    setPendingUserText(finalContent);
+    setInputText('');
+    handleRemoveAttachment();
 
     try {
-      let finalContent = inputText.trim();
-      let contentType = 'text';
-
-      // If there is an attached file, simulate/perform upload progress
-      if (attachedFile) {
-        setUploadProgress(20);
-        await new Promise((r) => setTimeout(r, 200));
-        setUploadProgress(65);
-        await new Promise((r) => setTimeout(r, 200));
-        setUploadProgress(100);
-
-        contentType = attachedFile.type.startsWith('image/')
-          ? 'image'
-          : attachedFile.type.includes('pdf')
-          ? 'document'
-          : attachedFile.type.startsWith('video/')
-          ? 'video'
-          : attachedFile.type.startsWith('audio/')
-          ? 'audio'
-          : 'multimodal';
-
-        const fileNote = `[Attached ${contentType.toUpperCase()}: ${attachedFile.name} (${(attachedFile.size / 1024).toFixed(1)} KB)]`;
-        finalContent = finalContent ? `${fileNote}\n${finalContent}` : fileNote;
-      }
-
-      setInputText('');
-      handleRemoveAttachment();
-      await onSendMessage(finalContent, contentType);
+      await onSendMessage(finalContent, contentType, currentFile || undefined);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to send message. Please try again.');
+      setErrorMessage(err?.message || 'Failed to send message. Please try again.');
     } finally {
+      setPendingUserText(null);
       setSending(false);
-      setUploadProgress(null);
     }
   };
 
@@ -138,39 +159,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return <FileText className="w-4 h-4 text-emerald-500" />;
   };
 
-  if (!session) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50">
-        <div className="w-16 h-16 rounded-3xl bg-sky-100 text-sky-600 flex items-center justify-center mb-4 shadow-sm">
-          <Sparkles className="w-8 h-8" />
-        </div>
-        <h3 className="text-lg font-bold text-slate-800">No Tutoring Session Active</h3>
-        <p className="text-xs text-slate-500 max-w-sm mt-1">
-          Select an existing session from the sidebar or click "New" to start guided problem solving.
-        </p>
-      </div>
-    );
-  }
+  const messages = session?.messages || [];
+  const isEmptyChat = messages.length === 0 && !pendingUserText;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden">
-      {/* Session Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-2xs">
-        <div>
-          <span className="text-[10px] font-bold text-sky-600 uppercase tracking-wider">
-            {session.subject}
-          </span>
-          <h2 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
-            {session.title}
-          </h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-            Socratic Mode Active
-          </span>
-        </div>
-      </div>
-
+    <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
       {/* Error Alert Banner */}
       {errorMessage && (
         <div className="bg-rose-50 border-b border-rose-200 px-6 py-2.5 text-xs text-rose-700 flex items-center justify-between">
@@ -187,216 +180,186 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         </div>
       )}
 
-      {/* Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-        {session.messages.length === 0 ? (
-          <div className="text-center py-12 max-w-md mx-auto">
-            <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center mx-auto mb-3 shadow-sm">
-              <Bot className="w-6 h-6" />
+      {/* Main Message Stream */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6">
+        {isEmptyChat ? (
+          <div className="h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto py-12">
+            <div className="w-12 h-12 rounded-2xl bg-sky-600 text-white flex items-center justify-center mb-4 shadow-sm">
+              <GraduationCap className="w-6 h-6" />
             </div>
-            <h4 className="font-bold text-slate-800 text-sm">Welcome to your guided session!</h4>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Ask any STEM question, attach a photo of your handwritten math problem, or upload a worksheet.
-              Your tutor will guide you step by step.
+            <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">
+              What can I help you with today?
+            </h2>
+            <p className="text-sm text-slate-500 mt-2 max-w-md">
+              Ask any question directly, or attach an image, PDF, Word document, audio, or video.
             </p>
           </div>
         ) : (
-          session.messages.map((msg) => {
-            const isUser = msg.sender_role === 'user';
-            return (
-              <div
-                key={msg.id}
-                className={`flex gap-3 max-w-3xl ${isUser ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
-              >
+          <div className="max-w-3xl mx-auto py-6 space-y-6">
+            {messages.map((msg) => {
+              const isUser = msg.sender_role === 'user';
+              return (
                 <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-white shadow-xs ${
-                    isUser ? 'bg-sky-600' : 'bg-slate-800'
-                  }`}
+                  key={msg.id}
+                  className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
-                  {isUser ? <UserIcon className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-                </div>
-
-                <div
-                  className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed ${
-                    isUser
-                      ? 'bg-sky-600 text-white rounded-tr-none shadow-md shadow-sky-600/10'
-                      : 'bg-white text-slate-800 border border-slate-200/80 rounded-tl-none shadow-sm'
-                  }`}
-                >
-                  {isUser ? (
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
-                  ) : (
-                    <TutorResponse
-                      content={msg.content}
-                      citations={msg.citations}
-                      onPlayAudio={() => onPlayVoice(msg.content)}
-                    />
+                  {!isUser && (
+                    <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <Bot className="w-4 h-4" />
+                    </div>
                   )}
 
                   <div
-                    className={`text-[10px] mt-2 font-medium ${
-                      isUser ? 'text-sky-200 text-right' : 'text-slate-400'
+                    className={`rounded-2xl text-sm leading-relaxed ${
+                      isUser
+                        ? 'max-w-[80%] px-4 py-2.5 bg-slate-100 text-slate-900'
+                        : 'flex-1 min-w-0 text-slate-800'
                     }`}
                   >
-                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {isUser ? (
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    ) : (
+                      <TutorResponse
+                        content={msg.content}
+                        citations={msg.citations}
+                        onPlayAudio={() => onPlayVoice(msg.content)}
+                      />
+                    )}
                   </div>
+
+                  {isUser && (
+                    <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <UserIcon className="w-4 h-4" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Optimistic Pending User Message */}
+            {pendingUserText && (
+              <div className="flex gap-3 justify-end">
+                <div className="max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed bg-slate-100 text-slate-900">
+                  <div className="whitespace-pre-wrap">{pendingUserText}</div>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <UserIcon className="w-4 h-4" />
                 </div>
               </div>
-            );
-          })
-        )}
+            )}
 
-        {/* Sending / Thinking Indicator */}
-        {sending && (
-          <div className="flex gap-3 max-w-xl mr-auto animate-in fade-in duration-200">
-            <div className="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="bg-white border border-slate-200/80 rounded-2xl rounded-tl-none p-4 shadow-sm flex items-center gap-3">
-              <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
-              <div className="text-xs text-slate-600 font-medium">
-                AI Tutor is analyzing your problem and preparing Socratic guidance...
+            {/* Thinking Indicator */}
+            {sending && (
+              <div className="flex gap-3 justify-start">
+                <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div className="flex items-center gap-2.5 py-2 text-sm text-slate-500">
+                  <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
+                  <span>Thinking...</span>
+                </div>
               </div>
-            </div>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Dock & Attachments */}
-      <div className="bg-white border-t border-slate-200 p-4">
-        {/* File Preview Attachment Pill */}
-        {attachedFile && (
-          <div className="mb-2 max-w-md bg-slate-100 rounded-xl p-2.5 flex items-center justify-between border border-slate-200 text-xs animate-in slide-in-from-bottom-1">
-            <div className="flex items-center gap-2 truncate">
-              {attachedPreviewUrl ? (
-                <img src={attachedPreviewUrl} alt="Thumbnail" className="w-8 h-8 rounded-lg object-cover" />
-              ) : (
-                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0">
-                  {getFileIcon(attachedFile)}
+      {/* Centered Composer Input Bar */}
+      <div className="bg-white px-4 pb-4 pt-2">
+        <div className="max-w-3xl mx-auto">
+          {/* Attached File Preview */}
+          {attachedFile && (
+            <div className="mb-2 max-w-md bg-slate-100 rounded-xl p-2 flex items-center justify-between border border-slate-200 text-xs">
+              <div className="flex items-center gap-2 truncate">
+                {attachedPreviewUrl ? (
+                  <img src={attachedPreviewUrl} alt="Preview" className="w-8 h-8 rounded-lg object-cover" />
+                ) : (
+                  <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0">
+                    {getFileIcon(attachedFile)}
+                  </div>
+                )}
+                <div className="truncate">
+                  <span className="font-medium text-slate-800 truncate block">{attachedFile.name}</span>
+                  <span className="text-[10px] text-slate-500">{(attachedFile.size / 1024).toFixed(1)} KB</span>
                 </div>
-              )}
-              <div className="truncate">
-                <span className="font-semibold text-slate-800 truncate block">{attachedFile.name}</span>
-                <span className="text-[10px] text-slate-400">{(attachedFile.size / 1024).toFixed(1)} KB</span>
               </div>
+              <button
+                type="button"
+                onClick={handleRemoveAttachment}
+                className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <button
-              onClick={handleRemoveAttachment}
-              className="p-1 text-slate-400 hover:text-rose-600 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+          )}
 
-        {/* Upload Progress Bar */}
-        {uploadProgress !== null && (
-          <div className="mb-2 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-            <div
-              className="bg-sky-600 h-1.5 transition-all duration-200"
-              style={{ width: `${uploadProgress}%` }}
-            />
-          </div>
-        )}
+          <input
+            ref={hiddenFileInputRef}
+            type="file"
+            accept="image/*,.pdf,.docx,audio/*,video/*"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                handleFileAttach(e.target.files[0]);
+              }
+            }}
+          />
 
-        {/* Hidden File Input */}
-        <input
-          ref={hiddenFileInputRef}
-          type="file"
-          accept="image/*,.pdf,.docx,audio/*,video/*"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files && e.target.files[0]) {
-              handleFileAttach(e.target.files[0]);
-            }
-          }}
-        />
-
-        {/* Active Recording Pill */}
-        {isRecording && (
-          <div className="mb-2 bg-rose-50 border border-rose-200 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-rose-700 animate-pulse">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping" />
-              <span className="font-semibold">Recording speech: {recordingSeconds}s</span>
-            </div>
-            <button
-              onClick={handleToggleRecord}
-              className="text-[11px] font-bold text-rose-800 underline hover:text-rose-900"
-            >
-              Finish & Attach
-            </button>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 border border-slate-300 rounded-2xl px-4 py-2 bg-white focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-100 transition-all">
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              placeholder="Ask a question or describe a problem... (Press Enter to send, Shift+Enter for newline)"
-              className="flex-1 text-xs sm:text-sm bg-transparent border-none outline-none resize-none max-h-32 min-h-[44px] py-1 text-slate-800 placeholder-slate-400"
-              rows={1}
-            />
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              {/* Quick file attach */}
+          <form onSubmit={handleSubmit}>
+            <div className="flex items-end gap-2 border border-slate-300 rounded-2xl px-3 py-2 bg-slate-50/70 focus-within:bg-white focus-within:border-slate-400 focus-within:shadow-sm transition-all">
               <button
                 type="button"
                 onClick={() => hiddenFileInputRef.current?.click()}
-                className="p-2 text-slate-400 hover:text-sky-600 hover:bg-slate-50 rounded-xl transition-colors"
-                title="Attach image, PDF, DOCX, audio or video"
+                className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 rounded-xl transition-colors shrink-0"
+                title="Attach file (Image, PDF, DOCX, Audio, Video)"
               >
                 <Paperclip className="w-4 h-4" />
               </button>
 
-              {/* Advanced modal upload */}
-              <button
-                type="button"
-                onClick={onOpenUpload}
-                className="p-2 text-slate-400 hover:text-sky-600 hover:bg-slate-50 rounded-xl transition-colors"
-                title="Open upload modal with preview"
-              >
-                <ImageIcon className="w-4 h-4" />
-              </button>
+              <textarea
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
+                placeholder="Ask anything..."
+                className="flex-1 text-sm bg-transparent border-none outline-none resize-none max-h-36 min-h-[36px] py-1.5 text-slate-900 placeholder-slate-400"
+                rows={1}
+              />
 
-              {/* Microphone toggle */}
               <button
                 type="button"
                 onClick={handleToggleRecord}
-                className={`p-2 rounded-xl transition-colors ${
-                  isRecording ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-sky-600 hover:bg-slate-50'
+                className={`p-2 rounded-xl transition-colors shrink-0 ${
+                  isRecording
+                    ? 'bg-rose-600 text-white animate-pulse'
+                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
-                title={isRecording ? 'Stop recording' : 'Speak your question (STT)'}
+                title={isRecording ? 'Stop dictation' : 'Voice dictation'}
               >
                 {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
 
-              {/* Submit send */}
               <button
                 type="submit"
                 disabled={(!inputText.trim() && !attachedFile) || sending}
-                className="p-2.5 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white rounded-xl transition-all shadow-sm shadow-sky-200 disabled:shadow-none"
+                className="p-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl transition-colors shrink-0"
+                title="Send message"
               >
                 <Send className="w-4 h-4" />
               </button>
             </div>
-          </div>
+          </form>
 
-          <div className="flex items-center justify-between px-2 text-[11px] text-slate-400">
-            <span>
-              Tip: Use <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-600">$formula$</code> for KaTeX math rendering
-            </span>
-            <span className="hidden sm:inline">Images • PDFs • DOCX • Audio • Video Ready</span>
+          <div className="text-center text-[11px] text-slate-400 mt-1.5">
+            Supports text, images, PDFs, DOCX, audio, and video. Press Enter to send.
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

@@ -42,7 +42,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors mb-6 ml-1"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Homepage
+          Back to Chat
         </button>
 
         <div className="flex items-center gap-3">
