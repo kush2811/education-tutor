@@ -12,8 +12,9 @@ class CitationValidator:
     """Audits citation references in AI answers against actual retrieved curriculum context."""
 
     def __init__(self):
-        # Matches patterns like [1], [2], [1, 2], [10]
-        self._citation_pattern = re.compile(r'\[(\d+)\]')
+        # Matches 1-indexed citation markers like [1], [2], [10] not followed by Markdown link '('
+        self._citation_pattern = re.compile(r'\[([1-9]\d*)\](?!\()')
+        self._code_split_pattern = re.compile(r'(```[\s\S]*?```|`[^`\n]+`)')
 
     def validate_citations(
         self,
@@ -33,8 +34,16 @@ class CitationValidator:
         warnings: List[str] = []
         sanitized_text = answer
 
-        # 1. Extract all [N] references in the answer
-        found_indices = [int(m) for m in self._citation_pattern.findall(answer)]
+        # When no curriculum sources/citations exist, prose brackets like [1] are not bibliographic RAG citations
+        if not citations and not retrieved_chunks:
+            return audit_items, sanitized_text, warnings
+
+        # Audit prose only so code array indexing (e.g. arr[1] inside ```c ... ```) is never altered
+        segments = self._code_split_pattern.split(answer)
+        prose_only = "".join(seg for idx, seg in enumerate(segments) if idx % 2 == 0)
+
+        # 1. Extract all [N] references in prose
+        found_indices = [int(m) for m in self._citation_pattern.findall(prose_only)]
         unique_indices = sorted(list(set(found_indices)))
 
         # Build lookup maps for fast verification
@@ -48,6 +57,7 @@ class CitationValidator:
         chunk_map = {idx + 1: ch for idx, ch in enumerate(retrieved_chunks or [])}
 
         # 2. Audit each referenced citation index
+        phantom_indices = set()
         for idx in unique_indices:
             label = f"[{idx}]"
 
@@ -61,12 +71,7 @@ class CitationValidator:
                     )
                 )
                 warnings.append(f"Phantom citation detected: {label} has no matching curriculum reference.")
-                # Annotate in sanitized text
-                sanitized_text = re.sub(
-                    rf'\[{idx}\]',
-                    f"[{idx} (Unverified Citation)]",
-                    sanitized_text
-                )
+                phantom_indices.add(idx)
                 continue
 
             # Citation object is present
@@ -142,6 +147,16 @@ class CitationValidator:
                     details=f"Citation {label} verified: Grounded in '{source_name}', page {page_num}."
                 )
             )
+
+        if phantom_indices:
+            for seg_idx in range(0, len(segments), 2):
+                for p_idx in phantom_indices:
+                    segments[seg_idx] = re.sub(
+                        rf'\[{p_idx}\](?!\()',
+                        f"[{p_idx} (Unverified Citation)]",
+                        segments[seg_idx]
+                    )
+            sanitized_text = "".join(segments)
 
         # 3. Check for unused citations
         # If retrieved context has citations but the answer didn't cite them, note for diagnostic audit

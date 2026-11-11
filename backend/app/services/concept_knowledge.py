@@ -418,3 +418,4 @@ def find_best_concept(query: str) -> Optional[Dict[str, Any]]:
                 return CONCEPT_KNOWLEDGE_BASE[all_aliases[close_word[0]]]
 
     return None
+

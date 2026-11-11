@@ -1,721 +1,300 @@
 # AI-Powered Multimodal Student Tutor & Problem Solver
 
-An intelligent, multi-turn, multimodal tutoring system engineered to guide students through complex STEM problems using the Socratic method, mathematical verification, diagram comprehension, and voice interaction.
+A full-stack, personal AI tutoring platform built with **FastAPI**, **React + TypeScript**, **Google Gemini**, **SymPy**, **ChromaDB**, and **Neural Edge-TTS**. Designed with a clean ChatGPT-style interface, it helps students understand STEM and programming concepts step-by-step with multi-turn conversation memory, LaTeX math rendering, code analysis, multimodal uploads, and synchronized read-aloud voice playback.
 
 ---
 
-## 🏛️ System Architecture
+## Project Overview
+
+This application acts as a personal one-on-one tutor rather than a search or dictionary lookup tool:
+- Explains topics in student-friendly, structured Markdown adapted to **Beginner**, **Intermediate**, and **Advanced** depth levels.
+- Preserves **session-isolated multi-turn memory**, resolving natural follow-up prompts (`"example"`, `"why?"`, `"give code"`, `"explain line by line"`, `"give me a practice question"`) cleanly within the active conversation thread without leaking context between sessions or users.
+- Verifies explicit algebra, calculus, and arithmetic steps symbolically using **SymPy** before presenting step-by-step derivations.
+- Supports **Listen**, **Save**, and **Copy** controls on tutor responses, complete with math-normalized speech and word-level synchronized highlighting.
+
+---
+
+## Main Features
+
+- **Google Gemini Conversational Tutor:** Powered by `google-genai` using multi-turn conversation history and custom educational system instructions. Fails explicitly with actionable API error messages rather than falling back to canned dictionary or Wikipedia text.
+- **Session & User Isolation:** Persistent study sessions stored in SQLite/PostgreSQL (`StudySession`, `SessionMessage`) with per-user ownership enforcement (`403 Forbidden` on unauthorized cross-user access) and isolated guest namespaces.
+- **Symbolic Math & Safe AST Code Verification:**
+  - `SymPy` computes exact rational arithmetic, quadratic roots, derivatives, integrals, limits, and statistics.
+  - Python `ast` static analyzer evaluates time complexity and syntax safety without executing arbitrary code.
+- **Multimodal Question Ingestion (`/api/v1/ingest`, `/api/v1/pipeline/execute-file`):** Processes text, printed/handwritten images, PDFs (`PyMuPDF`), Word documents (`python-docx`), audio, and video clips into normalized student queries.
+- **Neural Text-to-Speech & Subtitle Sync (`/api/v1/voice`):** Synthesizes natural voices via `edge-tts`, converts LaTeX equations (`$...$`, `$$...$$`), tables, and code blocks into natural spoken phrasing, and aligns highlighted words to audio playback.
+- **On-Demand Hybrid RAG Curriculum Grounding (`/api/v1/knowledge`, `/api/v1/rag`):** Combines ChromaDB dense vector search and Okapi BM25 sparse search with Reciprocal Rank Fusion (RRF), attaching verified references when curriculum sources or citations are requested.
+- **Answer Validation Layer (`/api/v1/validation`):** Checks factual grounding, citation integrity, symbolic math consistency, and Python code safety while preserving programming syntax and conversational follow-ups.
+- **Production Security & Deployment Ready:** Sliding-window rate limiting middleware, security headers (`nosniff`, `DENY`, `HSTS`), sensitive-data log masking, Dockerfiles, Nginx config, and `docker-compose` setups.
+
+---
+
+## Technologies Used
+
+### Backend
+- **Framework:** FastAPI, Uvicorn, Gunicorn (Linux production)
+- **LLM & AI:** Google GenAI SDK (`google-genai`)
+- **Database & ORM:** SQLAlchemy, SQLite (local dev), PostgreSQL (`psycopg2-binary` in prod)
+- **Math & Code Analysis:** SymPy, Python `ast`
+- **RAG & Document Processing:** ChromaDB, Rank-BM25, NumPy, PyMuPDF (`fitz`), python-docx, Pillow, BeautifulSoup4
+- **Voice & Audio:** Edge-TTS (`edge-tts`)
+- **Validation & Config:** Pydantic v2, `pydantic-settings`, `python-dotenv`, HTTPX
+- **Testing:** Pytest, `pytest-asyncio`
+
+### Frontend
+- **Framework:** React 18, TypeScript, Vite 5
+- **Styling & Icons:** Tailwind CSS 3, Lucide React, `clsx`, `tailwind-merge`
+- **Math Rendering:** KaTeX
+
+---
+
+## Model & AI Configuration
+
+| Component | Model / Engine | Purpose |
+| :--- | :--- | :--- |
+| **Primary Tutor LLM** | `gemini-3.5-flash-lite` (configurable via `GEMINI_MODEL`) | Fast multi-turn conversational tutoring, explanations, code generation, and practice questions |
+| **Fallback LLM Chain** | `gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-3.6-flash` | Automatic model-level failover on transient unavailability/deprecation (`404`/`503`/`504`/`429`) |
+| **Symbolic Math Engine** | `SymPy 1.14` | Deterministic verification of equations, derivatives, integrals, limits, and statistics |
+| **Curriculum Embeddings** | `text-embedding-004` + deterministic 768-dim local hashing | Dense semantic search inside ChromaDB |
+| **Voice Synthesis** | Edge-TTS (`en-US-AriaNeural`, `en-US-GuyNeural`, `en-US-JennyNeural`, `en-US-ChristopherNeural`) | Neural speech generation with `WordBoundary` timestamp alignment |
+
+---
+
+## Dataset & Knowledge Base Information
+
+No large raw datasets or binary databases are committed to this repository. Instead:
+- The authoritative curriculum metadata registry (`backend/app/services/knowledge_sources.py`) defines open educational sources including **NCERT**, **ePathshala**, **NPTEL**, **OpenStax**, **MIT OpenCourseWare**, **LibreTexts**, **Python 3 Docs**, and **arXiv**.
+- Documents uploaded or ingested through `POST /api/v1/knowledge/documents/ingest` are cleaned, semantically chunked with math formula preservation, hashed against duplicates (`sha256`), and indexed locally into ChromaDB (`backend/storage/vector_store`) and SQLite (`backend/tutor.db`), both excluded by `.gitignore`.
+
+---
+
+## Project Directory Structure
+
+```text
+ai-tutor/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/endpoints/        # auth, health, ingest, knowledge, pipeline, rag, session, tutor, user, validation, voice
+│   │   ├── core/                    # config, file_security, logging, rate_limiter, security, security_headers
+│   │   ├── db/                      # SQLAlchemy Base & SessionLocal
+│   │   ├── models/                  # ORM models: User, StudySession, SessionMessage, UploadedAsset, Knowledge tables
+│   │   ├── schemas/                 # Pydantic v2 request/response contracts
+│   │   ├── services/                # tutor_engine, context_manager, pipeline_orchestrator, rag_*, sympy_solver, voice_*
+│   │   └── main.py                  # FastAPI application entrypoint
+│   ├── tests/                       # Comprehensive unit, integration, security, voice, RAG & Gemini memory tests
+│   ├── .env.example                 # Backend environment template
+│   ├── Dockerfile                   # Multi-stage non-root backend image
+│   ├── gunicorn_conf.py             # Production Gunicorn worker config
+│   ├── pytest.ini                   # Pytest configuration
+│   └── requirements.txt             # Backend Python dependencies
+├── docs/                            # Detailed architecture, API, DB, RAG, deployment, voice & QA documentation
+├── frontend/
+│   ├── src/
+│   │   ├── components/              # ChatInterface, TutorResponse, SessionList, Header, VoicePlayer, AuthModal, etc.
+│   │   ├── pages/                   # LandingPage, LoginPage, RegisterPage, StudentDashboard
+│   │   ├── services/api.ts          # Type-safe REST API client
+│   │   ├── types/index.ts           # Shared TypeScript types
+│   │   └── App.tsx                  # Root ChatGPT-style app layout & state management
+│   ├── .env.example                 # Frontend API URL template
+│   ├── Dockerfile                   # Nginx multi-stage frontend image
+│   ├── nginx.conf                   # Production reverse-proxy & SPA routing rules
+│   ├── package.json                 # Node dependencies & build scripts
+│   └── vite.config.ts               # Vite config
+├── scripts/
+│   ├── demonstration_walkthrough.py # Automated 10-step feature walkthrough
+│   ├── run_backend.ps1              # Windows PowerShell backend launcher
+│   └── run_frontend.ps1             # Windows PowerShell frontend launcher
+├── .env.example                     # Root environment template
+├── .env.production.example          # Production environment template (placeholders only)
+├── .gitignore                       # Git exclusions for venvs, .env secrets, node_modules, logs, DBs & storage
+├── docker-compose.yml               # Local containerized stack
+├── docker-compose.prod.yml          # Production PostgreSQL + FastAPI + Nginx stack
+├── requirements.txt                 # Root dependency pointer (-r backend/requirements.txt)
+└── README.md
+```
+
+---
+
+## System Architecture
 
 ```mermaid
 flowchart TD
     subgraph Client ["Frontend Client (React + TypeScript + Vite)"]
-        ChatUI["Socratic Chat Interface"]
-        CanvasUI["Interactive Whiteboard / Scratchpad"]
-        MathEngine["KaTeX Formula Rendering ($...$)"]
-        AuthUI["Student Authentication (JWT)"]
-        CurriculumUI["Verified OER Curriculum Explorer"]
-        UploadUI["Multimodal File Uploader (Images/PDFs)"]
+        ChatUI["ChatGPT-Style Tutor Chat UI"]
+        SidebarUI["Session History Sidebar"]
+        MathEngine["KaTeX Formula Rendering"]
+        VoiceUI["Listen / Voice Player Dock (Save & Copy)"]
     end
 
-    subgraph API_Gateway ["FastAPI Backend Services"]
-        Router["API v1 Gateway (/api/v1)"]
-        AuthModule["Auth & Security Service (PBKDF2/JWT)"]
-        SessionMgr["Session & Conversation Manager"]
-        IngestRouter["File Upload & Ingestion Gateway"]
+    subgraph API ["FastAPI Backend (/api/v1)"]
+        PipelineEP["Pipeline & Tutor Endpoints"]
+        AuthEP["Auth & Session Ownership Guards"]
+        ContextMgr["Conversation Context Manager"]
     end
 
-    subgraph Modular_Services ["Modular AI & Tutoring Services"]
-        AIGateway["AI Gateway (Gemini 1.5 Multimodal)"]
-        SocraticEngine["Socratic Pedagogical State Machine"]
-        SymPyVerifier["SymPy Symbolic Math Verifier"]
-        VisionOCR["Multimodal Vision & Diagram OCR"]
-        DocParser["Layout-Aware Document Parser (PyMuPDF)"]
-        RAGEngine["Hybrid RAG Engine (Dense + BM25)"]
-        KnowledgeBase["OER Curriculum Manager"]
-        VoiceService["Voice & Speech Service"]
-        SubtitleAligner["Word Timestamp Alignment Engine"]
+    subgraph Services ["AI, Verification & Speech Services"]
+        Gemini["Google Gemini Multi-Turn Engine"]
+        SymPy["SymPy Symbolic Verifier"]
+        RAG["Hybrid RAG (ChromaDB + BM25)"]
+        Validator["Citation & Consistency Validator"]
+        VoiceSvc["Edge-TTS + WordBoundary Aligner"]
     end
 
-    subgraph Persistence ["Data & Vector Storage"]
-        SQLiteDB[("SQLite Database (Async/Sync SQLAlchemy)")]
-        VectorStore[("ChromaDB Vector Store (Curriculum RAG)")]
-        AssetStorage[("Uploaded Images, Documents & Audio")]
+    subgraph Storage ["Local / Persistent Storage (Git-Ignored)"]
+        DB[("SQLite / PostgreSQL")]
+        VectorDB[("ChromaDB Vector Store")]
+        Files[("Uploads & Audio MP3 Cache")]
     end
 
-    Client -->|HTTP / WebSocket| Router
-    Router --> AuthModule
-    Router --> SessionMgr
-    Router --> IngestRouter
-    Router --> Modular_Services
-    SessionMgr --> SQLiteDB
-    AuthModule --> SQLiteDB
-    IngestRouter --> AssetStorage
-    IngestRouter --> SQLiteDB
-    Modular_Services --> SQLiteDB
-    Modular_Services --> VectorStore
+    Client --> API
+    API --> AuthEP
+    API --> ContextMgr
+    API --> Services
+    Services --> DB
+    RAG --> VectorDB
+    VoiceSvc --> Files
 ```
 
 ---
 
-## 📁 Project Directory Structure
-
-```text
-ai-multimodal-tutor/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   └── v1/
-│   │   │       ├── endpoints/
-│   │   │       │   ├── auth.py          # Student registration, login, /me JWT verification
-│   │   │       │   ├── user.py          # Student profile management & dashboard analytics
-│   │   │       │   ├── health.py        # System health & DB readiness endpoint
-│   │   │       │   ├── session.py       # Tutoring session & message CRUD (Conversations)
-│   │   │       │   ├── ingest.py        # Multimodal ingestion: text, images, PDF, DOCX, audio, video
-│   │   │       │   ├── knowledge.py     # Educational sources registry, doc ingestion & curriculum search
-│   │   │       │   ├── rag.py           # End-to-end RAG question answering, retrieval diagnostics & evaluation
-│   │   │       │   ├── tutor.py         # AI Tutor endpoints: /solve, /math, /code, /study-aid, /practice, /chat
-│   │   │       │   ├── validation.py    # Answer validation & hallucination control: /validate-answer, /check-citations
-│   │   │       │   ├── voice.py         # Text-to-speech & synchronized subtitles: /generate, /audio, /normalize
-│   │   │       │   └── pipeline.py      # Master end-to-end pipeline: /execute, /execute-file
-│   │   │       └── router.py            # Aggregated v1 API router
-│   │   ├── core/
-│   │   │   ├── config.py                # Pydantic Settings & environment config
-│   │   │   ├── file_security.py         # MIME validation, size limits & sanitization
-│   │   │   ├── logging.py               # Structured application logger with sensitive data masking
-│   │   │   ├── security.py              # PBKDF2 password hashing & HMAC-SHA256 JWT
-│   │   │   ├── security_headers.py      # HTTP security headers injection
-│   │   │   └── rate_limiter.py          # In-memory sliding-window rate limiting middleware
-│   │   ├── db/
-│   │   │   ├── base.py                  # SQLAlchemy declarative base
-│   │   │   └── session.py               # Synchronous SQLite session provider
-│   │   ├── models/
-│   │   │   ├── user.py                  # User / Student profile ORM model
-│   │   │   ├── session.py               # StudySession & SessionMessage ORM models
-│   │   │   ├── asset.py                 # UploadedAsset ORM model
-│   │   │   └── knowledge.py             # EducationalSource, KnowledgeDocument, DocumentChunk, QualityReport
-│   │   ├── schemas/
-│   │   │   ├── health.py                # Health check response schemas
-│   │   │   ├── auth.py                  # Login, registration, token schemas
-│   │   │   ├── user.py                  # User profile schemas
-│   │   │   ├── session.py               # Session & Message request/response schemas
-│   │   │   ├── asset.py                 # Uploaded file schemas
-│   │   │   ├── unified_input.py         # UnifiedQuestionPayload, SourceFileInfo & schemas
-│   │   │   ├── knowledge.py             # Sources, chunks, documents, queries & quality audit schemas
-│   │   │   ├── rag.py                   # RAG queries, responses, citations, diagnostics & evaluation schemas
-│   │   │   ├── tutor.py                 # Pydantic models for problem solving, math, code, study aids & practice
-│   │   │   ├── validation.py            # Grounding status, citation audits, source conflicts & consistency schemas
-│   │   │   ├── voice.py                 # TTS request/response, timestamped sentence and word segment schemas
-│   │   │   └── pipeline.py              # Master end-to-end pipeline execution & performance metric schemas
-│   │   ├── services/
-│   │   │   ├── text_normalizer.py       # Whitespace & LaTeX bracket normalization
-│   │   │   ├── image_processor.py       # Image preprocessing & Gemini vision OCR
-│   │   │   ├── pdf_processor.py         # PyMuPDF page-aware extraction & table parser
-│   │   │   ├── docx_processor.py        # python-docx structured hierarchy parser
-│   │   │   ├── audio_processor.py       # Audio STT with Gemini & offline fallback
-│   │   │   ├── video_processor.py       # 30s keyframe sampling & multimodal audio/visual fusion
-│   │   │   ├── unified_pipeline.py      # Master input router to UnifiedQuestionPayload
-│   │   │   ├── knowledge_sources.py     # Source registry & legal compliance validation
-│   │   │   ├── knowledge_cleaner.py     # Text cleaning, boilerplate & duplicate removal
-│   │   │   ├── knowledge_extractor.py   # Multi-format doc extractor (PDF, DOCX, HTML, TXT)
-│   │   │   ├── educational_chunker.py   # Concept-aware semantic chunking with formula retention
-│   │   │   ├── embedding_service.py     # Gemini text-embedding-004 + 768-dim local projection
-│   │   │   ├── vector_store.py          # Persistent ChromaDB vector store collection manager
-│   │   │   ├── data_quality.py          # Validation auditing for missing text & duplicate chunks
-│   │   │   ├── knowledge_manager.py     # Knowledge lifecycle, duplicate detection, versioning
-│   │   │   ├── query_processor.py       # Query normalization, domain classification, and expansion
-│   │   │   ├── rag_retriever.py         # Hybrid retrieval (ChromaDB Dense + BM25 Sparse) & RRF reranking
-│   │   │   ├── context_builder.py       # Reference cards and citation metadata mapping
-│   │   │   ├── answer_generator.py      # Grounded LLM answering with anti-hallucination guardrails
-│   │   │   ├── rag_service.py           # Master 5-stage RAG coordinator & latency tracker
-│   │   │   ├── rag_evaluator.py         # Benchmark evaluator measuring recall@k, precision, and latency
-│   │   │   ├── sympy_solver.py          # Symbolic mathematics engine: arithmetic, algebra, calculus, statistics
-│   │   │   ├── code_assistant.py        # Safe static AST code analysis, complexity evaluation, debugging
-│   │   │   ├── study_aid_generator.py   # Chapter summaries, key takeaways, definitions, revision notes
-│   │   │   ├── practice_generator.py    # Bloom's taxonomy MCQs with distractor rationales & worked problems
-│   │   │   ├── tutor_engine.py          # Master pedagogical tutor coordinator: decomposition, levels, Socratic feedback
-│   │   │   ├── citation_validator.py    # Citation audit: existence, document match, valid page & canonical URLs
-│   │   │   ├── source_grounding_checker.py # Factual assertion grounding & insufficient context detector
-│   │   │   ├── source_conflict_detector.py # Academic convention & duality contradiction resolver (Authority hierarchy)
-│   │   │   ├── answer_consistency_checker.py # Question relevance, logic flow, SymPy arithmetic & AST code safety
-│   │   │   ├── answer_validator.py      # Master validation & hallucination control coordinator
-│   │   │   ├── speech_normalizer.py     # Educational speech normalizer: LaTeX math, code summaries, tables, headings
-│   │   │   ├── voice_service.py         # Neural edge-tts voice synthesis & timestamped sentence/word aligner
-│   │   │   ├── context_manager.py       # Conversation context management, anaphora & session isolation
-│   │   │   └── pipeline_orchestrator.py # Master 10-step unified end-to-end pipeline orchestrator
-│   │   └── main.py                      # FastAPI app factory, CORS & lifespan
-│   ├── tests/
-│   │   ├── conftest.py                  # Pytest fixtures & test client
-│   │   ├── test_api.py                  # Health, Auth, Session & Upload test suite
-│   │   ├── test_multimodal.py           # Comprehensive multimodal ingestion test suite
-│   │   ├── test_knowledge_base.py       # Phase 4 educational knowledge base test suite
-│   │   ├── test_rag.py                  # Phase 5 RAG pipeline & evaluation test suite
-│   │   ├── test_tutor.py                # Phase 6 tutor, math, code, study aids & practice test suite
-│   │   ├── test_validation.py           # Phase 7 answer validation, citations, conflicts & consistency test suite
-│   │   ├── test_voice.py                # Phase 8 TTS voice generation, subtitles & speech normalization test suite
-│   │   ├── test_personalization.py      # Phase 9 conversation history, preferences & privacy test suite
-│   │   └── test_e2e_integration.py      # Phase 10 comprehensive E2E integration test suite (21 tests)
-│   ├── requirements.txt                 # Backend Python dependencies
-│   ├── pytest.ini                       # Pytest test runner config
-│   └── .env.example                     # Backend environment template
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── AuthModal.tsx            # Student sign in & account registration
-│   │   │   ├── ChatInterface.tsx        # Multi-turn chat with LaTeX math rendering
-│   │   │   ├── CurriculumView.tsx       # Verified OER curriculum explorer
-│   │   │   ├── FileUploadModal.tsx      # Image, PDF & worksheet uploader
-│   │   │   ├── Header.tsx               # App header with live backend status & auth
-│   │   │   ├── MathRenderer.tsx         # KaTeX formula renderer for $...$ and $$...$$
-│   │   │   ├── ProfileModal.tsx         # User profile and learning progress
-│   │   │   ├── SessionList.tsx          # Study sessions sidebar with creation modal
-│   │   │   ├── TutorResponse.tsx        # Socratic markdown answer display with KaTeX & code
-│   │   │   ├── VoicePlayer.tsx          # Audio playback dock with sentence highlighting
-│   │   │   └── WhiteboardCanvas.tsx     # Interactive student scratchpad & canvas
-│   │   ├── pages/
-│   │   │   ├── LandingPage.tsx          # Landing page with feature highlights & hero
-│   │   │   ├── LoginPage.tsx            # Full-page login interface
-│   │   │   ├── RegisterPage.tsx         # Registration interface with grade/subject selection
-│   │   │   └── StudentDashboard.tsx     # Student dashboard with metrics & active sessions
-│   │   ├── services/
-│   │   │   └── api.ts                   # Type-safe API client (Auth, Sessions, Uploads)
-│   │   ├── types/
-│   │   │   └── index.ts                 # Shared TypeScript interfaces
-│   │   ├── App.tsx                      # Main application view & tab coordinator
-│   │   ├── index.css                    # Tailwind CSS base & utilities
-│   │   ├── vite-env.d.ts                # Vite environment typings
-│   │   └── main.tsx                     # React DOM entrypoint
-│   ├── package.json                     # Frontend npm packages
-│   ├── vite.config.ts                   # Vite bundler configuration
-│   ├── tsconfig.json                    # TypeScript compiler options
-│   ├── tailwind.config.js               # Tailwind styling configuration
-│   └── .env.example                     # Frontend environment template
-├── scripts/
-│   ├── run_backend.ps1                  # PowerShell script to start FastAPI backend
-│   └── run_frontend.ps1                 # PowerShell script to start Vite frontend
-├── .env.example                         # Master environment variables template
-├── .gitignore                           # Git ignore rules for Python, Node, DB & secrets
-└── README.md                            # Comprehensive technical documentation
-```
-
----
-
-## 🚀 Getting Started
+## Installation & Setup
 
 ### Prerequisites
-- **Python 3.11+** (Tested with Python 3.14)
-- **Node.js v18+** & **npm**
+- **Python 3.11+** (tested on Python 3.14)
+- **Node.js 18+** & **npm**
+- A **Google Gemini API key** from Google AI Studio
 
-### 1. Backend Setup
+### 1. Clone the Repository
 ```bash
+git clone <your-github-repo-url>
+cd ai-tutor
+```
+
+### 2. Backend & Virtual Environment Setup
+
+#### Windows (PowerShell)
+```powershell
 cd backend
 python -m venv venv
-
-# Windows PowerShell:
-.\venv\Scripts\activate
-
-# Install dependencies:
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-
-# Create environment file:
 copy .env.example .env
 ```
 
-### 2. Frontend Setup
+#### macOS / Linux
 ```bash
-cd ../frontend
-npm install
-copy .env.example .env
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+cp .env.example .env
 ```
 
-### 3. Running the Application
+*(Alternatively, from the repository root with your virtual environment activated, you can run `pip install -r requirements.txt`, which references `backend/requirements.txt`.)*
 
-**Option A: Convenience Scripts (PowerShell)**
-- Terminal 1 (Backend):
-  ```powershell
-  .\scripts\run_backend.ps1
-  ```
-- Terminal 2 (Frontend):
-  ```powershell
-  .\scripts\run_frontend.ps1
-  ```
+Open `backend/.env` and set your Gemini API key:
+```env
+GEMINI_API_KEY="your_actual_gemini_api_key_here"
+GEMINI_MODEL="gemini-3.5-flash-lite"
+```
 
-**Option B: Manual Commands**
-- Backend:
-  ```powershell
-  cd backend
-  .\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-  ```
-- Frontend:
-  ```powershell
-  cd frontend
-  npm run dev
-  ```
-
-Interactive API documentation: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).  
-Application UI: [http://localhost:5173](http://localhost:5173).
+### 3. Frontend Setup
+From the repository root:
+```bash
+cd frontend
+npm install
+```
+Copy the frontend environment template:
+- Windows PowerShell: `copy .env.example .env`
+- macOS / Linux: `cp .env.example .env`
 
 ---
 
-## 🧪 Testing
+## How to Run the Project
 
-To execute the backend unit test suite:
+### Local Development
+
+**Terminal 1 — Start the Backend API:**
 ```powershell
-cd backend
-.\venv\Scripts\python.exe -m pytest tests/ -v
+# From backend/
+.\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+Or via convenience script from repo root on Windows:
+```powershell
+.\scripts\run_backend.ps1
 ```
 
-To build and verify the frontend application:
+**Terminal 2 — Start the Frontend UI:**
+```bash
+# From frontend/
+npm run dev
+```
+Or via convenience script from repo root on Windows:
 ```powershell
+.\scripts\run_frontend.ps1
+```
+
+Once both servers are running:
+- **Student Chat UI:** `http://localhost:5173`
+- **Swagger / OpenAPI Docs:** `http://127.0.0.1:8000/docs`
+
+### Running with Docker
+```bash
+# Development container stack
+GEMINI_API_KEY=your_key docker compose up --build
+
+# Production stack (configure .env from .env.production.example first)
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+---
+
+## Testing & Verification
+
+Run the full backend test suite (requires valid `GEMINI_API_KEY` in `backend/.env` for live Gemini integration tests):
+```powershell
+cd backend
+.\venv\Scripts\pytest.exe -v
+```
+Latest verified test run: **87 / 87 tests passing**, covering API health/auth, multimodal ingestion, knowledge base & RAG, SymPy math & AST code analysis, validation & citation guards, neural voice & subtitle normalization, multi-turn conversation memory, Gemini failure reporting (zero silent fallback), cross-user isolation, and end-to-end integration.
+
+Verify the TypeScript & production frontend bundle build:
+```bash
 cd frontend
 npm run build
 ```
 
 ---
 
-## 🗺️ Project Roadmap & Phase Status
+## Screenshots
 
-| Phase | Description | Status |
-| :--- | :--- | :--- |
-| **Phase 0** | **Project Analysis & System Architecture** | ✅ Completed & Approved |
-| **Phase 1** | **Project Setup & Foundation (FastAPI, SQLite, React, Vite, Tailwind)** | ✅ Completed & Approved |
-| **Phase 2** | **Student Interface & Authentication (Dashboard, Socratic Chat, Voice Dock)** | ✅ Completed & Approved |
-| **Phase 3** | **Multimodal Input Ingestion Pipeline (Text, Image, PDF, DOCX, Audio, Video)** | ✅ Completed & Approved |
-| **Phase 4** | **Educational Knowledge Base Development (Source Registry, Chunking, ChromaDB)** | ✅ Completed & Approved |
-| **Phase 5** | **Retrieval-Augmented Generation (RAG: Hybrid Search, Reranking, Citations)** | ✅ Completed & Approved |
-| **Phase 6** | **AI Tutor and Educational Problem Solver (SymPy, AST Code, Study Aids, Practice)** | ✅ Completed & Approved |
-| **Phase 7** | **Answer Validation & Hallucination Control (Grounding, Citations, Consistency)** | ✅ Completed & Approved |
-| **Phase 8** | **Text-to-Speech and Synchronized Subtitles (Neural Voice, Word Alignment, Scrubber)** | ✅ Completed & Approved |
-| **Phase 9** | **Conversation History, Personalization & Privacy Controls** | ✅ Completed & Approved |
-| **Phase 10** | **End-to-End Integration, Security Hardening & Performance Benchmarking** | ✅ Completed & Fully Verified |
+Add screenshots of your running UI in a `docs/screenshots/` folder if desired before publishing showcases:
+- **Direct Chat Tutor View:** ChatGPT-style conversation screen with structured Markdown, KaTeX equations, code blocks, and `Listen`, `Save`, and `Copy` buttons.
+- **Session History Sidebar:** Per-user/guest chat thread switcher with create, rename, and delete controls.
+- **Synchronized Voice Playback Dock:** Interactive audio player with play/pause, playback speed (`0.75x`–`2.0x`), and line/word subtitle highlighting.
 
 ---
 
-## 🌐 Phase 10: End-to-End Integration, Security Hardening & Performance Benchmarking
+## Additional Documentation
 
-Phase 10 unites all multimodal input parsers, knowledge base retrieval, Socratic problem solving, SymPy symbolic validation, hallucination control, and neural speech synthesis into a singular, production-ready educational platform.
-
-### 1. Complete Unified Workflow (`/api/v1/pipeline/`)
-The platform delivers a cohesive 10-step pipeline:
-1. **Student Input Ingestion:** Accepts text, printed/handwritten images, PDFs, DOCX files, audio recordings, or video clips (`/execute` and `/execute-file`).
-2. **Question Extraction:** Layout-aware extraction, OCR, STT, and LaTeX normalization (`TextNormalizer`, `UnifiedInputPipeline`).
-3. **Query Classification:** Automatic query intent categorizer (`definition`, `formula_lookup`, `step_by_step_solution`, `conceptual_explanation`) and STEM domain identifier (`Mathematics`, `Physics`, `Chemistry`, `Biology`, `Computer Science`).
-4. **Curriculum RAG Retrieval:** ChromaDB dense semantic retrieval + BM25 sparse keyword search combined via Reciprocal Rank Fusion ($RRF$).
-5. **Symbolic Verification & Socratic Tutoring:** Step-by-step problem decomposition with SymPy verification for algebra, calculus, and statistics.
-6. **Hallucination Control & Validation Layer:** Citation existence verification, factual assertion grounding, contradiction resolution, and consistency audit.
-7. **Socratic Markdown Generation:** Formats structured educational solutions with Problem Understanding, Given Information, Required Result, Steps, and Why It Works.
-8. **Educational Speech Normalization:** Converts LaTeX equations, markdown tables, and code snippets into spoken English.
-9. **Neural Edge-TTS Audio & Aligned Subtitles:** Synthesizes natural speech with millisecond-level sentence boundaries and word-level timestamps.
-10. **Multi-Turn Session Persistence:** Automatically logs both user inquiries and tutor responses to the student's conversation history.
-
-### 2. Multi-Tier Security Hardening
-- **Sliding-Window Rate Limiting:** Enforces client request quotas (`RATE_LIMIT_PER_MINUTE = 120`), returning `HTTP 429 Too Many Requests` with `Retry-After: 60` headers when burst limits are exceeded.
-- **Security Headers Injection:** Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, and `Strict-Transport-Security`.
-- **Sensitive Data Redaction:** Automatically sanitizes API keys (`AIza***`, `sk-***`), Bearer tokens, and plaintext passwords from logs.
-- **Tenant Data Isolation:** Enforces strict access control preventing students from accessing, modifying, or deleting other students' sessions or uploaded files (`403 Forbidden`).
-
-### 3. Operational Performance & Latency Benchmarks
-Microsecond latency profiling across the entire execution chain (`performance_metrics`):
-- **Input Processing:** ~2ms (text) to ~120ms (PDF/Image OCR).
-- **Query Classification:** ~0.5ms.
-- **Curriculum Retrieval:** ~15ms - 45ms (hybrid ChromaDB + BM25).
-- **Pedagogical Answer Generation & SymPy:** ~40ms - 150ms.
-- **Answer Validation:** ~5ms - 15ms.
-- **Neural TTS & Subtitle Alignment:** ~200ms - 800ms (streaming edge-tts).
-- **Total End-to-End Turnaround:** Well within interactive latency budgets (< 1.5s total).
+Detailed engineering documents live in [`docs/`](docs/):
+- [System Architecture](docs/SYSTEM_ARCHITECTURE.md)
+- [API Documentation](docs/API_DOCUMENTATION.md)
+- [Database Documentation](docs/DATABASE_DOCUMENTATION.md)
+- [RAG & Knowledge Base](docs/RAG_AND_KNOWLEDGE_BASE.md)
+- [Multimodal Pipeline](docs/MULTIMODAL_PIPELINE.md)
+- [Voice Synchronization](docs/VOICE_SYNCHRONIZATION.md)
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md)
+- [Testing Report](docs/TESTING_REPORT.md)
+- [Demonstration Guide](docs/DEMONSTRATION_GUIDE.md)
 
 ---
 
-## 👤 Phase 9: Conversation History and Personalization
-
-Phase 9 establishes persistent, privacy-protected dialogue state and customizable learning profiles, enabling students to organize their academic exploration into distinct, renamed sessions with persistent multimodal message context.
-
-### 1. Conversation History & Session Management (`/api/v1/sessions/`)
-- **Full Session CRUD:** Create (`POST`), list (`GET`), detail view (`GET /{id}`), rename (`PUT /{id}`), and delete (`DELETE /{id}`) with automatic cascading message cleanup.
-- **Inline Renaming UI:** Students can rename study sessions inline from the left navigation sidebar with instant keyboard shortcuts (`Enter` to save, `Esc` to cancel).
-- **Session Isolation:** Dialogue history is strictly partitioned by `session_id`, preventing cross-topic contamination.
-
-### 2. Rich Multimodal Message Storage
-Every exchange persists full multimodal provenance within `SessionMessage`:
-- `sender_role`: `"user"`, `"assistant"`, or `"system"`.
-- `input_type`: Source media modality (`"text"`, `"image"`, `"audio"`, `"pdf"`, `"docx"`, `"video"`).
-- `extracted_question`: Normalized academic question extracted from multimodal OCR/STT.
-- `content`: Formatted student inquiry or Socratic tutor markdown response.
-- `citations_json`: Serialized bibliographic cards with textbook title, chapter, page number, and license.
-- `audio_url`: Canonical reference link to the synthesized TTS MP3 audio stream.
-- `created_at`: Exact timestamp of exchange.
-
-### 3. Student Personalization & Learning Preferences (`/api/v1/users/preferences`)
-Personalized configuration managed via dedicated endpoints (`GET` and `PUT` `/api/v1/users/preferences`):
-- **Explanation Rigor Level:**
-  - `beginner`: Intuitive real-world analogies, step-by-step guidance, foundational terms.
-  - `intermediate`: Standard curriculum rigor, standard notation, balanced algebra.
-  - `advanced`: Formal axiomatic definitions, rigorous proofs, asymptotic complexity analysis.
-- **Preferred AI Neural Voice:** Choice among `en-US-AriaNeural`, `en-US-GuyNeural`, `en-US-JennyNeural`, and `en-US-ChristopherNeural`.
-- **Default Playback Speed:** Adjustable speech rate presets (`0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`).
-- **Preferred Language:** Multilingual preference setting (`en`, `es`, `fr`, `de`, `hi`).
-- **Focus Academic Subjects:** Student-selected primary subjects (`Mathematics`, `Physics`, `Chemistry`, `Computer Science`, `Biology`).
-
-### 4. Context Management & Anaphoric Resolution (`ConversationContextManager`)
-- **Anaphoric Inquiry Detection:** Uses contextual regex analysis (`"that"`, `"it"`, `"the formula"`, `"why"`, `"step 2"`, `"repeat"`, `"what if x = 5"`) to detect student questions relying on prior turns.
-- **Targeted Context Extraction:** When an anaphoric follow-up is detected, extracts governing mathematical equations (`$$...$$`) and inquiry hypotheses from the immediate prior turn to guide the next response.
-- **Zero Cross-Session Bleed:** New sessions or unattached queries receive zero dialogue context from unrelated conversations.
-
-### 5. Multi-Tenant Privacy & Asset Protection
-- **Session Ownership Guard:** Sessions created by an authenticated user are assigned `user_id`. Requests by other users to view, rename, post messages to, or delete that session return `403 Forbidden`.
-- **Asset Privacy Guard:** Files uploaded to `/api/v1/ingest/upload` record `user_id`. Attempts by unauthorized students to inspect foreign files return `403 Forbidden`.
-- **Guest Namespace Isolation:** Unauthenticated visitors operate in an isolated guest namespace (`user_id = None`) without access to registered student records.
-
----
-
----
-
-## 🎙️ Phase 8: Text-to-Speech and Synchronized Subtitles
-
-Phase 8 elevates the student tutor into a multi-sensory educational experience by combining natural neural speech synthesis with millisecond-accurate synchronized subtitle and word highlighting.
-
-### 1. Neural TTS Integration (`VoiceService`, `/api/v1/voice/`)
-- Integrates high-fidelity Microsoft neural voices via `edge-tts` (`en-US-AriaNeural`, `en-US-GuyNeural`, `en-US-JennyNeural`, `en-US-ChristopherNeural`).
-- Produces natural human cadence, conversational pacing, and accurate STEM pronunciation.
-- Streams generated MP3 files directly from `./storage/audio/` via `/api/v1/voice/audio/{filename}`.
-
-### 2. Timestamp Alignment & Subtitle Synchronizer
-- Captures native 100-nanosecond tick `SentenceBoundary` events directly from the neural speech engine.
-- Derives proportional word-level timestamps (`WordSegment`) bounded within the sentence duration, ensuring smooth visual tracking.
-- Returns structured responses pairing original markdown display sentences with their exact start and end timestamps.
-
-### 3. Structured Educational Speech Normalizer (`speech_normalizer.py`)
-- **Mathematical LaTeX Processing:** Converts raw formulas into conversational spoken phrases:
-  - `$$F = ma$$` $\rightarrow$ `"F equals m times a"`
-  - `\frac{1}{2} m v^2` $\rightarrow$ `"1 over 2 m times v squared"`
-  - `\sqrt{a^2 + b^2}` $\rightarrow$ `"the square root of a squared plus b squared"`
-  - `\lim_{x \to 0}` $\rightarrow$ `"the limit as x approaches 0 of"`
-  - `\int_{0}^{\pi}` $\rightarrow$ `"the integral from 0 to pi of"`
-  - Handles Greek letters (`\theta`, `\pi`, `\mu`, `\Delta`), operators (`\times`, `\pm`, `\approx`, `\le`), and implicit multiplication (`ma`, `mc^2`).
-- **Code Block Summarization:** Eliminates confusing syntax recitations (`open paren`, `curly brace`, `semicolon`), summarizing code blocks cleanly:
-  *"Here is a Python code implementation defining the function binary search to execute this logic."*
-- **Markdown Tables:** Flattens tabular matrices into spoken row sentences (`Row 1: [col1] is [val1]`).
-- **Citation Cleaning:** Strips bracket citations (`[1]`, `[2]`, `[99]`) from spoken speech to maintain natural narrative flow.
-
-### 4. Interactive Voice Player Dock (`VoicePlayer.tsx`)
-- **Active Sentence Highlighting:** Prominently highlights the sentence actively being spoken with smooth border and background accents.
-- **Word-Level Highlighting:** Dynamically animates the specific word being articulated inside the active sentence.
-- **Automatic Scrolling:** Automatically scrolls long explanations to keep the active sentence continuously visible.
-- **Playback Controls:** Full Play, Pause, Resume, Replay, and Previous/Next sentence navigation.
-- **Timeline Scrubber:** Interactive range scrubber allowing students to drag and seek to any second of the audio, automatically realigning active sentence markers.
-- **Playback Speed Selector:** Multi-speed options ($0.75\times, 1.0\times, 1.25\times, 1.5\times, 2.0\times$) adjusting both audio playback and visual progression synchronously.
-- **Interactive Sentence Clicking:** Clicking any sentence in the subtitle list instantly jumps audio playback to that sentence's start timestamp.
-
-### 5. Text-Only Mode
-- Provides a one-click toggle to collapse audio playback and switch to quiet reading mode, allowing students to study without audio distraction.
-
-### 6. Robust Fallback & Error Resilience
-- If network access or cloud neural TTS is unavailable, the backend automatically transitions to `forced_alignment_fallback`.
-- Accurately models academic speaking rates ($150\text{ words/minute}$) and sentence boundaries, enabling the frontend to seamlessly play via client-side `window.speechSynthesis` while maintaining 100% of the synchronized highlighting features.
-
-### 7. Endpoints
-- `POST /api/v1/voice/generate`: Converts educational markdown text into neural MP3 audio with aligned sentence and word segments.
-- `GET /api/v1/voice/audio/{filename}`: Securely streams synthesized MP3 files with hash-based filename validation.
-- `POST /api/v1/voice/normalize`: Returns the spoken speech script and sentence pairs without audio synthesis.
-
----
-
-## 🛡️ Phase 7: Answer Validation & Hallucination Control
-
-The validation layer operates as an automated intermediary gatekeeper positioned directly between AI answer generation and final student output. It rigorously verifies source grounding, enforces citation integrity, prevents hallucination on unindexed topics, resolves curriculum conflicts via authoritative hierarchy, and ensures mathematical and programming consistency.
-
-### 1. Intermediary Validation Architecture (`/api/v1/validation/`)
-- Intercepts answers generated by both the RAG pipeline (`rag_service`) and the pedagogical problem solver (`tutor_engine`).
-- Audits and sanitizes output before returning responses to the student interface.
-- Appends transparent, readable verification badges and audit notices to answers whenever discrepancies or unverified statements are detected.
-
-### 2. Source-Grounding Verification (`SourceGroundingChecker`)
-- Deconstructs answers into testable factual claims.
-- Evaluates token and entity overlap against retrieved curriculum excerpts.
-- Determines the exact supporting chunk and authoring body for every factual assertion.
-
-### 3. Citation Integrity Audit (`CitationValidator`)
-- **Phantom Index Detection:** Detects and flags citation markers (e.g. `[99]`) that do not exist in the retrieved curriculum context, rewriting them to `[N (Unverified Citation)]`.
-- **Document & Page Matching:** Verifies that citations correspond to the actual retrieved source document and possess non-negative, valid page numbers.
-- **URL Canonicalization:** Validates that bibliographic links are syntactically valid and point to approved educational domains.
-
-### 4. Insufficient Information Handling
-- The system never fabricates an answer when knowledge base coverage is missing or when retrieval confidence is below threshold.
-- Automatically detects low-confidence retrieval (< 0.25) or ungrounded queries and returns a transparent disclosure:
-  *"The educational knowledge base currently contains no verified curriculum materials matching this inquiry. The system will not generate unverified claims without authoritative curriculum grounding."*
-
-### 5. Source Conflict Detection & Authority Tiering (`SourceConflictDetector`)
-- Automatically detects scientific dualities and conflicting conventions among retrieved chunks (e.g. Thermodynamics First Law sign conventions $\Delta U = Q \pm W$, inclusion of zero in natural numbers $\mathbb{N}$, and standard gravitational acceleration approximations $g$).
-- Implements the Phase 4 **Curriculum Authority Hierarchy**:
-  1. **Tier 1 (Weight 100):** National Curriculum Bodies (NCERT).
-  2. **Tier 2 (Weight 90):** Government Portals (ePathshala, NPTEL IIT Madras).
-  3. **Tier 3 (Weight 80):** Official University Materials (OpenStax, MIT OpenCourseWare).
-  4. **Tier 4 (Weight 70):** Official Documentation & Verified OER (Python PSF, LibreTexts).
-  5. **Tier 5 (Weight 65):** Academic Preprints (arXiv).
-- Resolves conflicts in favor of higher-tier authorities; if authorities are of equal tier, presents both conventions explicitly to the student.
-
-### 6. Answer Consistency & Safety (`AnswerConsistencyChecker`)
-- **Question Relevance:** Verifies that the answer substantively addresses the student's inquiry, catching off-topic or evasive responses.
-- **Logical Flow:** Checks sequential continuity across step-by-step problem breakdowns.
-- **Mathematical Consistency via SymPy:** Extracts arithmetic and algebraic equivalence claims (e.g. equations, deduction steps) and tests equality using symbolic simplification, intercepting erroneous calculations before presentation.
-- **Programming Safety via AST:** Parses code blocks using Python `ast` to detect syntax errors, scans for disallowed system calls (`os.system`, `subprocess`, `rm -rf`, `eval`, `exec`), and flags unbounded while-loops.
-
-### 7. Confidence & Transparency
-- Rejects pseudo-scientific arbitrary confidence percentages (e.g. "98.7% accurate").
-- Classifies responses into three transparent, pedagogically grounded verification tiers:
-  - `SUPPORTED_BY_SOURCES`: Factual assertions are directly anchored in verified curriculum excerpts with valid citations.
-  - `GENERAL_MODEL_KNOWLEDGE`: Conceptually and mathematically consistent explanation from foundation model reasoning, without specific indexed curriculum chunks.
-  - `INSUFFICIENTLY_VERIFIED`: Unverified assertions, missing curriculum evidence, math discrepancies, or code safety violations flagged.
-
-### 8. Limitations of Automated Verification
-- Automated symbolic checking verifies deterministic algebraic equalities and arithmetic, but does not construct arbitrary higher-order formal proofs.
-- Static AST inspection validates syntax and identifies known hazardous execution patterns, but cannot simulate dynamic runtime behavior or non-Python code blocks.
-- Lexical and semantic overlap approximates source grounding, but does not replace domain-expert educator review.
-
-### 9. Endpoints
-- `POST /api/v1/validation/validate-answer`: Full end-to-end answer audit (citations, grounding, conflicts, consistency).
-- `POST /api/v1/validation/check-citations`: Standalone citation marker, URL, and page validation.
-- `POST /api/v1/validation/check-conflicts`: Standalone contradiction detection across retrieved curriculum chunks.
-- `POST /api/v1/validation/check-consistency`: Standalone question relevance, SymPy math, and AST code safety checks.
-
----
-
-## 🎓 Phase 6: AI Tutor & Educational Problem Solver
-
-The AI Tutor transforms the platform from a generic chatbot into an active, verified pedagogical tutor. It integrates symbolic mathematical verification, safe static code analysis, cognitive study aid generation, Bloom's taxonomy practice question synthesis, and multi-turn conversational context.
-
-### 1. Pedagogical Problem Decomposition (`/api/v1/tutor/solve`)
-Every STEM explanation is structured according to a strict educational scaffold:
-- **Problem Understanding:** Clarifying the core question and physics/math fundamentals in plain terms.
-- **Given Information:** Explicitly cataloging all provided variables, quantities, and boundary conditions.
-- **Required Result:** Identifying the exact target unknown or proof goal.
-- **Step-by-Step Solution:** Numbered procedural sequence where each step features a pedagogical title, detailed explanation, mathematical formulas in KaTeX, and rationale.
-- **Final Answer:** Clean, verified result highlighted for the student.
-- **Why It Works:** Explaining the underlying intuition, physical laws, or mathematical theorems ensuring deep conceptual transfer.
-
-### 2. Multi-Tier Explanation Levels
-The tutor adapts its tone, rigor, and depth across three distinct learning tiers:
-- `beginner`: Uses intuitive real-world analogies, minimizes heavy mathematical jargon, and guides step-by-step.
-- `intermediate`: Standard high-school and undergraduate curriculum depth, balancing equations, standard theorems, and structured derivations.
-- `advanced`: Rigorous university-level exposition incorporating formal axiomatic proofs, asymptotic behavior, domain restrictions, and structural constraints.
-
-### 3. Symbolic Mathematics Engine (`SymPySolver`, `/api/v1/tutor/math`)
-To guarantee exact mathematical precision without LLM hallucination, the backend employs **SymPy 1.14**:
-- **Arithmetic:** Exact rational arithmetic ($\frac{a}{b}$) preventing floating-point imprecision.
-- **Algebra:** Symbolic polynomial factorization, quadratic formula derivations, and multi-variable equation solving.
-- **Calculus:** Symbolic derivatives ($\frac{d}{dx}$), definite & indefinite integrals ($\int f(x) dx$), and one-sided/two-sided limits ($\lim_{x \to a} f(x)$).
-- **Statistics:** Population & sample mean ($\mu$), median, variance ($\sigma^2, s^2$), and standard deviation ($\sigma, s$).
-- **LaTeX Step Generation:** Each transformation produces intermediate LaTeX expressions for visual presentation in the student UI.
-
-### 4. Safe Static Programming Assistant (`CodeAssistant`, `/api/v1/tutor/code`)
-Provides safe, isolated software engineering guidance **without executing arbitrary submitted code on the host**:
-- **AST Parsing:** Uses Python's native `ast` module for deterministic static code inspection.
-- **Time Complexity Evaluation:** Analyzes AST loop nesting depth to determine Big-O complexity ($O(1), O(\log n), O(n), O(n^2), O(n^3)$).
-- **Recursion Detection:** Tracks recursive function invocations and identifies potential stack exhaustion risks.
-- **Syntax Error Localization:** Traps `SyntaxError` with line and column numbers and provides student-friendly remediation hints.
-- **Anti-Pattern & Bug Detection:** Identifies Python anti-patterns such as mutable default arguments (`def f(x=[])`) and potential infinite loops (`while True` lacking `break`).
-
-### 5. Educational Document Assistance & Study Aids (`StudyAidGenerator`, `/api/v1/tutor/study-aid`)
-Synthesizes educational reading material into structured learning aids:
-- **Executive Summaries:** High-level conceptual overview of chapters or technical articles.
-- **Key Takeaways:** High-yield bullet points prioritizing core testable insights.
-- **Glossary & Definitions:** Curated terminology dictionary mapping domain concepts to formal definitions.
-- **Revision Notes:** Condensed study sheets with mnemonics, common exam pitfalls, and essential review points.
-
-### 6. Practice Question Generator (`PracticeGenerator`, `/api/v1/tutor/practice`)
-Generates active recall materials categorized by **Bloom's Revised Taxonomy** (`Remember`, `Understand`, `Apply`, `Analyze`, `Evaluate`, `Create`):
-- **Multiple Choice Questions (MCQs):** Exactly 4 distinct options, correct index, and educational rationales explaining why distractors are incorrect.
-- **Worked Problems & Rubrics:** Open-ended problems with comprehensive scoring criteria and step-by-step rubrics.
-
-### 7. Multi-Turn Socratic Tutor Chat (`TutorEngine`, `/api/v1/tutor/chat`)
-- Retains multi-turn conversation context across student queries by persisting dialogue history in SQLite (`SessionMessage`).
-- Integrates Phase 5 RAG hybrid curriculum search to cite verified NCERT/OER sources.
-- Employs the Socratic method to provide guiding hints rather than simply giving away homework answers.
-
----
-
-## 🧠 Phase 5: Retrieval-Augmented Generation (RAG) Pipeline
-
-The RAG pipeline grounds student tutoring answers strictly in verified educational curricula, enforcing verifiable citations and proactive uncertainty communication.
-
-### 1. Multi-Stage RAG Architecture (`/api/v1/rag/`)
-- **Stage 1 (Query Processing):** Standardizes bracket LaTeX expressions, classifies query intent (`definition`, `formula_lookup`, `step_by_step_solution`, `conceptual_explanation`), identifies STEM subject domain, and enriches queries via educational synonym expansion.
-- **Stage 2 (Hybrid Retrieval):** Dual-engine search combining **ChromaDB Dense Semantic Search** (768-dim cosine similarity) and **Okapi BM25 Sparse Lexical Search** across indexed curriculum chunks.
-- **Stage 3 (Reciprocal Rank Fusion & Reranking):** Merges candidate lists using RRF ($RRF(d) = \sum \frac{1}{60 + rank(d)}$) and applies cross-feature reranking with structural heading affinity and formula alignment bonuses.
-- **Stage 4 (Context Construction):** Assembles structured reference cards with source titles, chapters, sections, exact page numbers, and canonical URLs.
-- **Stage 5 (Grounded Synthesis & Citations):** Instructs the LLM (Gemini 1.5 Flash with deterministic local fallback) to answer strictly from reference cards using numbered footnote citations (`[1]`, `[2]`), without fabricating sources or facts.
-- **Uncertainty Communication Guardrail:** When curriculum materials do not contain sufficient context, the pipeline detects the low confidence score and returns a transparent uncertainty response, preventing hallucinated answers on unindexed topics.
-
-### 2. Endpoints
-- `POST /api/v1/rag/query`: Primary student inquiry endpoint returning grounded explanation with verified citations.
-- `POST /api/v1/rag/retrieve`: Standalone diagnostic retrieval endpoint for inspecting dense, BM25, and rerank scores.
-- `POST /api/v1/rag/evaluate`: Automated benchmarking endpoint evaluating recall@k, citation validity, uncertainty accuracy, and latency.
-
----
-
-## 📚 Phase 4: Educational Knowledge Base Architecture
-
-The educational knowledge base system decouples tutoring answers from pure LLM memory, anchoring all reasoning in legally verified curricula.
-
-### 1. Authoritative Source Registry (`/api/v1/knowledge/sources`)
-- Pre-seeded with official, legally compliant educational sources across 6 categories:
-  - **NCERT Resources:** Mathematics Grade 10, Physics Grade 11, Chemistry Grade 12 (Fair Dealing).
-  - **Government Educational Portals:** ePathshala, NPTEL IIT Madras (CC BY-NC-SA 4.0).
-  - **Official University Materials:** OpenStax University Physics & Calculus (CC BY 4.0), MIT OpenCourseWare (CC BY-NC-SA 4.0).
-  - **Open Educational Resources (OER):** LibreTexts STEM, Khan Academy.
-  - **Official Programming Documentation:** Python 3 Official Docs (PSF License), MDN Web Docs (CC-BY-SA 2.5+).
-  - **Academic Research Sources:** arXiv.org Open STEM Preprints.
-
-### 2. Multi-Format Ingestion Pipeline (`/api/v1/knowledge/documents/ingest`)
-- **Supported Formats:** PDF (PyMuPDF), DOCX (python-docx), HTML (BeautifulSoup4), and TXT/Markdown.
-- **Structural Extraction:** Preserves heading hierarchies (H1-H4), tables as Markdown grids, exact page numbers, and LaTeX equations (`$...$`, `$$...$$`).
-- **Boilerplate & Noise Cleaning:** Automatically detects and removes textbook running headers, footers, duplicate lines, and publisher watermarks.
-
-### 3. Concept-Aware Semantic Chunking
-- Splits content along natural sentence and concept boundaries without bisecting mathematical formulas.
-- Automatically isolates major chapters and sections to prevent concept bleeding across unrelated topics.
-- Every chunk embeds immutable metadata: `document_id`, `source_id`, `chapter`, `section`, `page_number`, `extracted_math`, and `sha256_hash`.
-
-### 4. Vector Storage & High-Dimension Embeddings
-- **ChromaDB Vector Store:** Embedded persistent HNSW vector indexing located in `./storage/vector_store` under the `educational_curriculum` collection.
-- **Dual-Tier Embeddings:** 768-dimensional normalized dense vectors via Google Gemini `text-embedding-004` (cloud) or high-resolution feature hashing projection (offline deterministic fallback).
-
-### 5. Knowledge Lifecycle & Quality Validation
-- **Duplicate Document Detection:** Computes SHA-256 file checksums before ingestion; prevents redundant indexing.
-- **Document Versioning & Re-indexing:** Increments version (`v1`, `v2`, etc.), automatically purges outdated chunks from ChromaDB and SQLite, and indexes updated materials.
-- **Data Quality Audits (`/api/v1/knowledge/quality/reports`):** Validates documents for missing text (< 50 chars), duplicate chunk hashes, unsupported formats, and missing metadata.
-- **Curriculum Search (`POST /api/v1/knowledge/query`):** Executes semantic similarity matching and formats verifiable academic citations:
-  `"[Source Name], [Chapter], [Section], Page [X] ([Authority]) - License: [License]"`.
-
----
-
-## 📥 Phase 3: Multimodal Ingestion Pipeline
-
-The multimodal ingestion layer normalizes all student input channels into a single standardized schema: `UnifiedQuestionPayload`.
-
-### 1. Ingestion Endpoints (`/api/v1/ingest/`)
-- `POST /text`: Whitespace cleaning, bracket LaTeX delimiter conversion (`\[...\]` $\rightarrow$ `$$...$$`, `\(...\)` $\rightarrow$ `$`), equation detection, and academic domain routing.
-- `POST /image`: Pillow contrast stretching, auto-orientation deskew, Gemini 1.5 Flash Vision OCR extracting handwritten formulas and geometric diagrams.
-- `POST /pdf`: PyMuPDF layout-aware text extraction, table extraction (`find_tables`), page-indexed academic citation anchors.
-- `POST /docx`: `python-docx` heading hierarchy parsing, table restructuring into markdown grids, paragraph grouping.
-- `POST /audio`: Direct Gemini multimodal audio STT with offline fallback and student transcript confirmation flag.
-- `POST /video`: 30-second keyframe sampling strategy, visual blackboard OCR + audio track transcription fusion, timestamped reference anchors.
-- `POST /unified`: Master polymorph endpoint detecting MIME category automatically and dispatching to the appropriate parser.
-
-### 2. File Security Safeguards (`app/core/file_security.py`)
-- **Strict Size Limits:** Text (64 KB), Image (20 MB), PDF (50 MB), DOCX (25 MB), Audio (25 MB), Video (100 MB).
-- **MIME & Extension Enforcement:** Whitelist-based validation preventing executable uploads and spoofed extensions.
-- **Path Sanitization:** Filename sanitization with UUID prefixes preventing directory traversal.
-- **Temporary Cleanup:** Automatic resource cleanup on failed extractions.
-
-
----
-
-## 🛡️ Phase 7: Answer Validation & Hallucination Control
-
-A dedicated validation and guardrail layer intercepts every AI-generated response before it is displayed to the student:
-- **Source-Grounding Verification (`SourceGroundingChecker`):** Measures factual claim overlap against retrieved textbook chunks using n-gram overlap and semantic entailment; flags unsubstantiated assertions.
-- **Citation Audit Engine (`CitationValidator`):** Verifies that every bibliographic citation key corresponds to an actual chunk in the retrieved context pool, confirming exact document title, chapter, section, and page number.
-- **Symbolic Consistency Verification (`AnswerConsistencyChecker`):** Validates that numeric quantities in AI prose match the exact symbolic solutions computed by SymPy, eliminating arithmetic errors.
-- **Source Conflict Resolution (`SourceConflictDetector`):** Resolves contradictions across textbooks by applying authority scores ($W_{auth} \in [0.8, 1.0]$) and transparently communicating historical or curricular divergences to the student.
-- **Insufficient Knowledge Gate:** Halts generation and presents clear uncertainty guidance whenever retrieval confidence falls below threshold ($< 0.35$).
-
----
-
-## 🎙️ Phase 8: Neural Voice & Millisecond Subtitle Alignment
-
-Transforms written educational responses into a multisensory auditory and visual experience:
-- **Mathematical Speech Normalization (`SpeechNormalizer`):** Phonetically expands LaTeX formulas (e.g., $\sqrt{x^2+y^2}$ $\rightarrow$ *"square root of x squared plus y squared"*, $\frac{dy}{dx}$ $\rightarrow$ *"derivative of y with respect to x"*).
-- **Neural TTS Generation (`VoiceService`):** Connects to Microsoft Neural Edge-TTS (`en-US-AriaNeural`, `en-US-GuyNeural`, `en-GB-SoniaNeural`) with pitch retention and dynamic speed adjustment (`0.75x` to `2.0x`).
-- **Tick-Accurate Alignment (`voice_service.py`):** Converts 100-nanosecond `SentenceBoundary` event offsets into millisecond-accurate sentence and word intervals.
-- **Interactive Voice Dock (`VoiceDock.tsx`):** Implements real-time sentence tracking, active word glowing, seeking scrubber, play/pause synchronization, and automatic audio caching.
-
----
-
-## 👤 Phase 9: Persistent Conversation History & Personalization
-
-Empowers students to manage multi-turn dialogues and customize their learning preferences:
-- **Persistent Sessions (`ConversationSession` & `Message`):** Full CRUD session lifecycle with title renaming, topic classification, and soft archiving.
-- **Full Turn Storage:** Persists user inputs (text/multimodal), extracted questions, LaTeX formulas, AI Markdown solutions, citations, and generated audio paths.
-- **Context Management (`ContextManager`):** Tracks antecedent variables and multi-turn context (e.g., resolving *"What if that constant was negative?"* against prior equations) without carrying irrelevant historical drift into new sessions.
-- **Personalization Defaults:** Configures student explanation depth (`Beginner`, `Intermediate`, `Advanced`), preferred voice model, playback speed, and subject priorities.
-- **Privacy & Security Isolation:** Strict user-scoped database queries ensure multi-tenant data isolation; students can only view or delete their own sessions and files.
-
----
-
-## ⚡ Phase 10: End-to-End Integration, Rate Limiting & Hardening
-
-Unifies every component into a single, cohesive, production-hardened educational platform:
-- **Master Pipeline Orchestrator (`PipelineOrchestrator`):** Implements the complete automated pipeline:
-  $$\text{Input} \rightarrow \text{Validation} \rightarrow \text{OCR/STT} \rightarrow \text{Intent Classification} \rightarrow \text{Hybrid RAG} \rightarrow \text{SymPy Solving} \rightarrow \text{Hallucination Guard} \rightarrow \text{Neural TTS} \rightarrow \text{Subtitles}$$
-- **Sliding-Window Rate Limiter (`RateLimitMiddleware`):** In-memory 60-second sliding-window tracker throttling abusive burst traffic ($>120\text{ req/min}$) with HTTP 429 and `Retry-After: 60` headers.
-- **Security Headers Middleware (`SecurityHeadersMiddleware`):** Injects strict browser protections (`nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection`, `HSTS`, `Permissions-Policy`).
-- **Input Security & Sandboxing:** Validates magic bytes, enforces file quotas, and restricts code execution using a Python AST sandbox that blocks dangerous modules (`os`, `sys`, `subprocess`, `socket`).
-- **Comprehensive 21-Test E2E Suite (`test_e2e_integration.py`):** Fully verifies all modalities, mathematical problem decomposition, TTS latency, and security defenses.
-
----
-
-## 🚀 Phase 11: Production Deployment, Documentation & Verification
-
-Equips the project for production containerization, enterprise hosting, and automated auditing:
-
-### 1. Complete Documentation Suite
-Comprehensive technical documentation is maintained in the [`docs/`](docs/) directory:
-- [System Architecture & Specification](docs/SYSTEM_ARCHITECTURE.md)
-- [RESTful API Documentation & Endpoints](docs/API_DOCUMENTATION.md)
-- [Database Architecture & Entity-Relationship Schema](docs/DATABASE_DOCUMENTATION.md)
-- [Curriculum Knowledge Base & Hybrid RAG](docs/RAG_AND_KNOWLEDGE_BASE.md)
-- [Multimodal Ingestion Pipeline](docs/MULTIMODAL_PIPELINE.md)
-- [Neural Voice & Subtitle Synchronization](docs/VOICE_SYNCHRONIZATION.md)
-- [Production Deployment & Multi-Cloud Hosting Guide](docs/DEPLOYMENT_GUIDE.md)
-- [Quality Assurance, Benchmarks & Security Audit Report](docs/TESTING_REPORT.md)
-- [Interactive Student Demonstration Guide](docs/DEMONSTRATION_GUIDE.md)
-
-### 2. Multi-Stage Containerization (`Dockerfile` & `docker-compose`)
-- **Backend Dockerfile:** Multi-stage Python 3.11-slim container with non-root security user `appuser` (UID 10001), FFmpeg runtime, and curl health check.
-- **Frontend Dockerfile:** Node 20-alpine builder + Nginx alpine static server with gzip compression and SPA fallback routing.
-- **Production Compose (`docker-compose.prod.yml`):** Multi-service stack running PostgreSQL 16, FastAPI (Gunicorn 4 workers), and Nginx reverse proxy.
-
-### 3. Automated 10-Step Student Demonstration Walkthrough
-The automated verification script executes all 10 student interaction stages:
-```bash
-cd backend
-python ../scripts/demonstration_walkthrough.py
-```
-**Verification Output:**
-```text
-================================================================================
-   AI-POWERED MULTIMODAL STUDENT TUTOR - FINAL PROJECT DEMONSTRATION WALKTHROUGH 
-================================================================================
-STEP 1: Student Asks Question via Text                -> [PASSED: Math Extracted]
-STEP 2: Student Uploads an Image Worksheet            -> [PASSED: Diagram OCR]
-STEP 3: Student Uploads a PDF Document                -> [PASSED: Layout & Pages]
-STEP 4: Student Submits Recorded Audio Question       -> [PASSED: Whisper STT]
-STEP 5: AI Retrieves Educational Knowledge via RAG   -> [PASSED: 2 NCERT Chunks]
-STEP 6: AI Explains Solution with SymPy Verification  -> [PASSED: SymPy Verified]
-STEP 7: Student Listens to Synthesized Neural Voice   -> [PASSED: 8.06s Audio]
-STEP 8: Subtitles Synchronize with Alignment         -> [PASSED: Millisecond Timestamps]
-STEP 9: Student Asks an Anaphoric Follow-up Question  -> [PASSED: Context Resolved]
-STEP 10: Student Opens Persistent Conversation History-> [PASSED: 10 Turns Restored]
-================================================================================
-   ✓ ALL 10 DEMONSTRATION STEPS EXECUTED AND VERIFIED SUCCESSFULLY!
-================================================================================
-```
-
----
-
-## 📊 Comprehensive Development Roadmap
-
-| Phase | Description | Deliverables | Test Status |
-| :---: | :--- | :--- | :---: |
-| **0** | **System Architecture & Design** | Clean architecture specification, DDD modules, KaTeX math schema | Verified |
-| **1** | **Backend Foundation & Database** | FastAPI gateway, SQLite/PostgreSQL ORM, JWT authentication | 5 / 5 Pass |
-| **2** | **Student Interface & Auth** | React 18, Vite, Tailwind CSS, Socratic canvas, Voice Dock | Clean Build |
-| **3** | **Multimodal Input Ingestion** | Text normalizer, Image OCR, PyMuPDF, python-docx, Whisper, OpenCV | 8 / 8 Pass |
-| **4** | **Educational Knowledge Base** | NCERT registry, clean chunking, 768-dim embeddings, ChromaDB | 8 / 8 Pass |
-| **5** | **Curriculum Hybrid RAG** | Dense search, BM25 keyword index, Reciprocal Rank Fusion, citations | 7 / 7 Pass |
-| **6** | **AI Tutor & Problem Solver** | Socratic engine, SymPy verification, AST code sandbox, study aids | 9 / 9 Pass |
-| **7** | **Answer Validation & Safety** | Source-grounding, citation integrity, numeric check, conflict guard | 9 / 9 Pass |
-| **8** | **Voice & Subtitle Alignment** | Math speech normalizer, Neural Edge-TTS, nanosecond boundary sync | 7 / 7 Pass |
-| **9** | **History & Personalization** | Multi-turn sessions, context manager, difficulty levels, privacy | 7 / 7 Pass |
-| **10**| **End-to-End System Testing** | Master pipeline, rate limiter, security headers, 21-test suite | 21 / 21 Pass |
-| **11**| **Deployment & Final Docs** | Docker containers, Nginx, deployment matrix, full docs, 10-step demo | **81 / 81 Pass (100%)** |
+## Future Improvements
+
+- Streaming SSE token-by-token responses from Gemini to the React chat view for faster perceived time-to-first-token.
+- Redis-backed distributed rate limiting and session caching for multi-instance cloud scaling.
+- Interactive step-by-step whiteboard / SVG graph plotting tied directly to SymPy expressions.
+- Spaced-repetition flashcards and exportable PDF study sheets generated from chat history.

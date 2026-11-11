@@ -16,7 +16,7 @@ from app.services.unified_pipeline import unified_input_pipeline
 from app.services.query_processor import query_processor
 from app.services.rag_service import rag_service
 from app.schemas.rag import RAGQueryRequest
-from app.services.tutor_engine import tutor_engine
+from app.services.tutor_engine import tutor_engine, TutorGenerationError
 from app.schemas.tutor import TutorProblemSolveRequest
 from app.services.answer_validator import answer_validator
 from app.schemas.validation import AnswerValidationRequest
@@ -35,10 +35,18 @@ class PipelineOrchestrator:
         file_bytes: Optional[bytes] = None,
         filename: Optional[str] = None,
         mime_type: Optional[str] = None,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None
     ) -> PipelineExecutionResponse:
         """Executes the full 10-step unified workflow from multimodal input to synchronized voice response."""
         t_total_start = time.perf_counter()
+
+        # Verify session ownership upfront if session_id is supplied
+        if request.session_id and db:
+            existing_session = db.query(StudySession).filter(StudySession.id == request.session_id).first()
+            if existing_session and existing_session.user_id is not None:
+                if user_id is None or existing_session.user_id != user_id:
+                    raise TutorGenerationError("Access denied: you do not own this study session.", status_code=403)
 
         # Step 1: Input Detection & Processing
         t_input_start = time.perf_counter()
@@ -73,11 +81,12 @@ class PipelineOrchestrator:
         t_class_end = time.perf_counter()
         query_classification_time_ms = round((t_class_end - t_class_start) * 1000, 2)
 
-        # Step 3: Curriculum RAG Retrieval
+        # Step 3: Curriculum RAG Retrieval (only when the student explicitly asks for references/sources)
         t_rag_start = time.perf_counter()
         rag_citations: List[Dict[str, Any]] = []
         retrieved_chunks_count = 0
-        if db:
+        requests_references = tutor_engine._explicitly_requests_references(extracted_question)
+        if db and requests_references:
             try:
                 rag_req = RAGQueryRequest(
                     query=extracted_question,
@@ -85,8 +94,9 @@ class PipelineOrchestrator:
                     top_k=3
                 )
                 rag_out = rag_service.execute_rag(rag_req, db=db)
-                retrieved_chunks_count = rag_out.retrieved_chunks_count
-                rag_citations = [c.model_dump() for c in rag_out.citations]
+                if rag_out.is_context_sufficient and rag_out.citations:
+                    retrieved_chunks_count = rag_out.retrieved_chunks_count
+                    rag_citations = [c.model_dump() for c in rag_out.citations]
             except Exception as e:
                 logger.warning(f"RAG retrieval skipped in pipeline: {e}")
         t_rag_end = time.perf_counter()
@@ -99,34 +109,40 @@ class PipelineOrchestrator:
             subject=resolved_subject,
             level=request.level or "intermediate",
             session_id=request.session_id,
-            include_rag_curriculum=True
+            include_rag_curriculum=requests_references
         )
         if db:
-            solve_res = tutor_engine.solve_problem(solve_req, db=db)
+            solve_res = tutor_engine.solve_problem(solve_req, db=db, user_id=user_id)
         else:
             # Fallback when running without DB session
             from app.db.session import SessionLocal
             with SessionLocal() as temp_db:
-                solve_res = tutor_engine.solve_problem(solve_req, db=temp_db)
+                solve_res = tutor_engine.solve_problem(solve_req, db=temp_db, user_id=user_id)
 
         sympy_verified = solve_res.sympy_verified
         sympy_result = solve_res.sympy_details.get("latex_result") if solve_res.sympy_details else None
         formatted_markdown = solve_res.formatted_markdown
+        if solve_res.citations:
+            rag_citations = [c.model_dump() for c in solve_res.citations]
         t_answer_end = time.perf_counter()
         answer_generation_time_ms = round((t_answer_end - t_answer_start) * 1000, 2)
 
         # Step 5: Answer Validation & Hallucination Control
         t_val_start = time.perf_counter()
-        val_req = AnswerValidationRequest(
-            question=extracted_question,
-            answer=formatted_markdown,
-            retrieved_chunks=[],
-            citations=solve_res.citations,
-            subject=resolved_subject
-        )
-        val_res = answer_validator.validate_answer(val_req)
-        sanitized_markdown = val_res.sanitized_answer
-        validation_data = val_res.model_dump()
+        if solve_res.validation:
+            sanitized_markdown = formatted_markdown
+            validation_data = solve_res.validation
+        else:
+            val_req = AnswerValidationRequest(
+                question=extracted_question,
+                answer=formatted_markdown,
+                retrieved_chunks=[],
+                citations=solve_res.citations,
+                subject=resolved_subject
+            )
+            val_res = answer_validator.validate_answer(val_req)
+            sanitized_markdown = val_res.sanitized_answer
+            validation_data = val_res.model_dump()
         t_val_end = time.perf_counter()
         validation_time_ms = round((t_val_end - t_val_start) * 1000, 2)
 
@@ -155,6 +171,7 @@ class PipelineOrchestrator:
             try:
                 session = db.query(StudySession).filter(StudySession.id == request.session_id).first()
                 if session:
+                    user_ts, assistant_ts = tutor_engine._next_message_timestamps(session.id, db)
                     # Save user turn
                     user_msg = SessionMessage(
                         session_id=session.id,
@@ -162,7 +179,8 @@ class PipelineOrchestrator:
                         content_type=resolved_input_type if resolved_input_type != "text" else "text",
                         content=extracted_question,
                         input_type=resolved_input_type,
-                        extracted_question=extracted_question
+                        extracted_question=extracted_question,
+                        created_at=user_ts,
                     )
                     # Save assistant turn
                     audio_link = voice_data.get("audio_url") if voice_data else None
@@ -176,7 +194,8 @@ class PipelineOrchestrator:
                         extracted_question=extracted_question,
                         audio_url=audio_link,
                         citations_json=cits_json,
-                        metadata_json=json.dumps({"confidence_score": validation_data.get("confidence_score")})
+                        metadata_json=json.dumps({"confidence_score": validation_data.get("confidence_score")}),
+                        created_at=assistant_ts,
                     )
                     db.add_all([user_msg, assistant_msg])
                     db.commit()

@@ -1,9 +1,12 @@
 """API endpoints for Phase 6: AI Tutor and Educational Problem Solver."""
 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.user import User
+from app.api.v1.endpoints.auth import get_current_user_optional
 from app.schemas.tutor import (
     TutorProblemSolveRequest,
     TutorProblemSolveResponse,
@@ -18,7 +21,7 @@ from app.schemas.tutor import (
     TutorChatRequest,
     TutorChatResponse,
 )
-from app.services.tutor_engine import tutor_engine
+from app.services.tutor_engine import tutor_engine, TutorGenerationError
 from app.services.sympy_solver import sympy_solver
 from app.services.code_assistant import safe_code_assistant
 from app.services.study_aid_generator import study_aid_generator
@@ -35,7 +38,8 @@ router = APIRouter()
 )
 def solve_problem(
     request: TutorProblemSolveRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> TutorProblemSolveResponse:
     """Decomposes a problem into given info, required result, intermediate steps, verified answer,
     and why it works across Beginner, Intermediate, or Advanced explanation levels."""
@@ -45,7 +49,18 @@ def solve_problem(
             detail="Inquiry query cannot be empty or purely whitespace."
         )
     try:
-        return tutor_engine.solve_problem(request=request, db=db)
+        return tutor_engine.solve_problem(
+            request=request,
+            db=db,
+            user_id=current_user.id if current_user else None,
+        )
+    except HTTPException:
+        raise
+    except TutorGenerationError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -151,11 +166,28 @@ def generate_practice_questions(
 )
 def chat_with_tutor(
     request: TutorChatRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> TutorChatResponse:
     """Engages in multi-turn tutor dialogue, resolving follow-up questions within the active study session."""
+    if not request.message or not request.message.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message cannot be empty."
+        )
     try:
-        return tutor_engine.chat_turn(request=request, db=db)
+        return tutor_engine.chat_turn(
+            request=request,
+            db=db,
+            user_id=current_user.id if current_user else None,
+        )
+    except HTTPException:
+        raise
+    except TutorGenerationError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

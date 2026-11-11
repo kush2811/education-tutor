@@ -52,18 +52,39 @@ class AnswerConsistencyChecker:
             code_issues=code_issues
         )
 
+    FOLLOWUP_META_TOKENS = {
+        "example", "examples", "explain", "elaborate", "clarify", "simplify",
+        "continue", "repeat", "more", "details", "detail", "summary", "summarize",
+        "code", "program", "line", "step", "steps", "practice", "question",
+        "questions", "quiz", "problem", "problems", "give", "show", "write",
+        "make", "tell", "yes", "no", "ok", "okay", "please", "another", "next",
+    }
+
+    def _stem_token(self, tok: str) -> str:
+        """Lightweight singularization for token overlap matching (e.g. tables -> table)."""
+        if len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
+            return tok[:-1]
+        return tok
+
     def _check_question_relevance(self, question: str, answer: str) -> Tuple[float, bool]:
         """Check whether the generated answer substantively addresses the question's key concepts."""
         q_tokens = set(re.findall(r'\b[a-z0-9_]+\b', question.lower())) - STOPWORDS
         if not q_tokens:
             return 1.0, True
 
+        # Pure conversational follow-up requests (e.g. "example", "explain more", "give a practice question")
+        # depend on prior session dialogue rather than lexical repetition of the follow-up phrase itself.
+        if q_tokens.issubset(self.FOLLOWUP_META_TOKENS) and len(answer.strip()) >= 20:
+            return 1.0, True
+
         a_tokens = set(re.findall(r'\b[a-z0-9_]+\b', answer.lower())) - STOPWORDS
         if not a_tokens:
             return 0.0, False
 
-        overlap = len(q_tokens & a_tokens)
-        relevance_score = round(overlap / len(q_tokens), 3)
+        q_stems = {self._stem_token(t) for t in q_tokens}
+        a_stems = {self._stem_token(t) for t in a_tokens}
+        overlap = len(q_stems & a_stems)
+        relevance_score = round(overlap / len(q_stems), 3)
 
         # Check direct substring containment (e.g. math terms or expressions)
         clean_q = re.sub(r'[^a-z0-9+*/=-]', '', question.lower())
@@ -98,16 +119,32 @@ class AnswerConsistencyChecker:
         """Extract explicit arithmetic equations and check equality with SymPy."""
         discrepancies: List[str] = []
 
-        # Find arithmetic equality patterns like "2 + 3 = 6", "10 / 2 = 5", "x = 5"
-        # Match equations between $...$ or in plain lines
-        eq_patterns = re.findall(r'(?:(?:\$|\b)([0-9+\-*/^().\s]+)\s*=\s*([0-9+\-*/^().\s]+)(?:\$|\b))', answer)
+        # Exclude fenced code blocks and inline code from prose arithmetic checking
+        prose_answer = re.sub(r'```[\s\S]*?```|`[^`\n]+`', ' ', answer)
+        is_boolean_logic_context = bool(
+            re.search(r'\b(boolean|logic gate|or gate|nor gate|xor gate|truth table)\b', prose_answer, re.IGNORECASE)
+        )
 
-        for lhs_str, rhs_str in eq_patterns:
-            lhs_clean = lhs_str.strip()
-            rhs_clean = rhs_str.strip()
+        # Match standalone numeric equalities (LHS begins with digit, '(', or unary '-digit'), ignoring algebraic sub-expressions
+        eq_pattern = re.compile(
+            r'(?:(?:\$|(?<=\s)|(?<=^)|(?<=:)|(?<=,))((?:-\d|[\d(])[0-9+\-*/^().\s]*)\s*=\s*(-?[0-9][0-9+\-*/^().\s]*))'
+        )
 
-            # Ignore pure variable assignments like "x = 5" or empty strings
-            if not any(c in lhs_clean for c in "+-*/^"):
+        for match in eq_pattern.finditer(prose_answer):
+            lhs_clean = match.group(1).strip()
+            rhs_clean = match.group(2).strip()
+            prefix = prose_answer[:match.start(1)]
+
+            # Skip slices preceded by algebraic operators/variables/LaTeX commands (e.g. "x - 4 = 0", "f(x) = ...")
+            if re.search(r'(?:[+\-*/^\\]|(?<![a-zA-Z])[a-zA-Z])\s*$', prefix):
+                continue
+
+            # Ignore pure variable assignments or plain single numbers with no arithmetic operator on LHS
+            if not any(c in lhs_clean for c in "+-*/^") or re.fullmatch(r'-\d+(?:\.\d+)?', lhs_clean):
+                continue
+
+            # In Boolean algebra (OR gate), 1 + 1 = 1 is valid Boolean addition, not base-10 arithmetic
+            if is_boolean_logic_context and re.sub(r'\s+', '', f"{lhs_clean}={rhs_clean}") == "1+1=1":
                 continue
 
             # Standardize operators
@@ -150,8 +187,8 @@ class AnswerConsistencyChecker:
         return is_consistent, discrepancies
 
     def _extract_code_blocks(self, text: str) -> List[str]:
-        """Extract code blocks from markdown fences ```python ... ```."""
-        blocks = re.findall(r'```(?:python|py)?\n(.*?)```', text, re.DOTALL | re.IGNORECASE)
+        """Extract explicitly tagged Python code blocks from markdown fences ```python ... ```."""
+        blocks = re.findall(r'```(?:python|py)\b[^\n]*\n(.*?)```', text, re.DOTALL | re.IGNORECASE)
         return [b.strip() for b in blocks if b.strip()]
 
     def _check_code_safety_and_plausibility(self, code_blocks: List[str]) -> Tuple[bool, List[str]]:

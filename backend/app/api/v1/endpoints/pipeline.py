@@ -5,8 +5,11 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, s
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.user import User
+from app.api.v1.endpoints.auth import get_current_user_optional
 from app.schemas.pipeline import PipelineExecutionRequest, PipelineExecutionResponse
 from app.services.pipeline_orchestrator import pipeline_orchestrator
+from app.services.tutor_engine import TutorGenerationError
 from app.core.file_security import validate_file_security
 
 router = APIRouter()
@@ -20,14 +23,26 @@ router = APIRouter()
 )
 async def execute_pipeline(
     request: PipelineExecutionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> PipelineExecutionResponse:
     """Executes complete workflow:
     Input detection → Question extraction → Classification → RAG retrieval → SymPy solving →
     Answer validation → Markdown formatting → Neural TTS voice → Synchronized subtitles.
     """
     try:
-        return await pipeline_orchestrator.execute(request=request, db=db)
+        return await pipeline_orchestrator.execute(
+            request=request,
+            db=db,
+            user_id=current_user.id if current_user else None,
+        )
+    except HTTPException:
+        raise
+    except TutorGenerationError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -49,7 +64,8 @@ async def execute_pipeline_file(
     preferred_voice: Optional[str] = Form("en-US-AriaNeural"),
     playback_speed: Optional[float] = Form(1.0),
     synthesize_voice: Optional[bool] = Form(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> PipelineExecutionResponse:
     """Accepts uploaded image, PDF, DOCX, audio, or video file, extracts questions, executes
     RAG, Socratic tutoring, validation, and synthesizes audio with aligned subtitles."""
@@ -76,7 +92,15 @@ async def execute_pipeline_file(
             file_bytes=file_bytes,
             filename=file.filename,
             mime_type=file.content_type,
-            db=db
+            db=db,
+            user_id=current_user.id if current_user else None,
+        )
+    except HTTPException:
+        raise
+    except TutorGenerationError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
         )
     except Exception as e:
         raise HTTPException(

@@ -1,509 +1,473 @@
-"""Master educational tutor reasoning engine: multi-provider LLM, STEM concepts, SymPy math, RAG, and Wikipedia fallback."""
+"""Master educational tutor engine powered by Google Gemini with session memory and SymPy math verification."""
 
-import re
 import json
-from typing import List, Dict, Any, Optional
+import re
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
-import httpx
 
+from app.core.config import settings
+from app.core.logging import logger
+from app.models.session import SessionMessage, StudySession
+from app.schemas.rag import RAGCitation, RAGQueryRequest
 from app.schemas.tutor import (
-    TutorProblemSolveRequest,
-    TutorProblemSolveResponse,
     SolutionStep,
     TutorChatRequest,
     TutorChatResponse,
+    TutorProblemSolveRequest,
+    TutorProblemSolveResponse,
 )
-from app.models.session import StudySession, SessionMessage
-from app.services.sympy_solver import sympy_solver
-from app.services.rag_service import rag_service
+from app.schemas.validation import AnswerValidationRequest
 from app.services.answer_validator import answer_validator
 from app.services.context_manager import context_manager
-from app.services.concept_knowledge import find_best_concept
-from app.services.code_assistant import safe_code_assistant
-from app.schemas.rag import RAGQueryRequest
-from app.schemas.validation import AnswerValidationRequest
-from app.core.config import settings
-from app.core.logging import logger
+from app.services.rag_service import rag_service
+from app.services.sympy_solver import sympy_solver
 
 
-CHATGPT_STYLE_SYSTEM_PROMPT = (
-    "You are a helpful, clear, and knowledgeable AI Tutor chatting directly with a user.\n"
-    "Respond naturally, like ChatGPT talking clearly to someone.\n\n"
-    "STYLE & FORMATTING RULES:\n"
-    "1. Do NOT use emojis anywhere in your response.\n"
-    "2. Do NOT use robotic templates like 'Problem Understanding', 'Given Information', 'Analytical Target', or 'Required Result'.\n"
-    "3. Start directly with a clear, concise answer or definition.\n"
-    "4. When explaining formulas or concepts:\n"
-    "   - State the definition clearly.\n"
-    "   - Show a '### Formula' section with display LaTeX $$...$$ and a bulleted 'Where:' breakdown.\n"
-    "   - Provide a worked '### Example' with numbers.\n"
-    "5. Use $...$ for inline math and $$...$$ on its own line for display equations.\n"
-    "6. If solving a math equation step-by-step, number the steps ('Step 1:', 'Step 2:') and state 'Final Answer'.\n"
-    "7. Preserve conversation continuity if previous turns are provided."
+SUPPORTED_GEMINI_MODELS: Tuple[str, ...] = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
 )
+
+EDUCATIONAL_TUTOR_SYSTEM_PROMPT = """You are an intelligent, patient, and clear personal AI tutor conversing directly with a student.
+
+Core Teaching Principles:
+1. Explain concepts in warm, natural, student-friendly language—like a knowledgeable teacher chatting one-on-one.
+2. Provide thoughtful, thorough educational explanations rather than one-line dictionary definitions or encyclopedic snippets.
+3. Adjust depth to the student's question and requested pedagogical level (beginner: intuitive analogies and plain terms; intermediate: clear theory, examples, and applications; advanced: formal rigor, edge cases, and deeper analysis).
+4. Maintain strict conversation continuity within the session:
+   - Interpret follow-ups such as "example", "explain more", "why?", "give code", "give their truth tables", "explain the code line by line", or "give me a practice question" in the exact context of the earlier conversation.
+   - Never treat a follow-up prompt like "example" or "why?" as an isolated dictionary lookup.
+5. Ask 1-2 brief, helpful clarifying questions ONLY when the student's input is genuinely ambiguous and lacks prior context to resolve it.
+6. Never include irrelevant search results, dictionary definitions, or unrequested references/citations/URLs unless the student explicitly asks for sources or citations.
+7. Never use emojis anywhere in your response.
+
+Adaptive Response Formatting:
+- Choose only the formatting elements that fit the specific question—do NOT force every section into every reply:
+  - Topic heading (`## Topic`) when introducing or structuring a concept
+  - Clear definition and intuitive simple explanation
+  - Step-by-step derivation (`Step 1:`, `Step 2:`, ..., and `Final Answer`) with LaTeX math (`$...$` inline, `$$...$$` display on its own line) when solving mathematical equations or proofs
+  - Markdown tables for comparisons or truth tables
+  - Concrete examples and real-world practical applications where helpful
+  - Syntax-tagged fenced code blocks (such as ```c or ```python) plus clear code walkthroughs for programming requests
+  - Key takeaways / important points and a brief summary when covering broader concepts
+"""
+
+REFERENCE_REQUEST_PATTERN = re.compile(
+    r'\b(cite|citation|citations|reference|references|source|sources|textbook|ncert|oer|curriculum|syllabus|bibliography)\b',
+    re.IGNORECASE,
+)
+
+
+class TutorGenerationError(Exception):
+    """Explicit error raised when Gemini tutor generation cannot complete."""
+
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
 
 
 class EducationalTutorEngine:
-    """Orchestrates live LLMs, rich STEM knowledge, SymPy math solving, RAG, and encyclopedic search."""
+    """Orchestrates multi-turn Gemini tutoring, SymPy math checking, and explicit failure reporting."""
 
     def __init__(self):
         self._gemini_client = None
-        if settings.GEMINI_API_KEY:
+        self._configured_api_key: Optional[str] = None
+
+    def _get_gemini_client(self):
+        """Return a configured Google GenAI client or raise TutorGenerationError if missing."""
+        api_key = (settings.GEMINI_API_KEY or "").strip()
+        if not api_key:
+            self._gemini_client = None
+            self._configured_api_key = None
+            raise TutorGenerationError(
+                "Gemini API key is not configured. Please set GEMINI_API_KEY in backend/.env.",
+                status_code=503,
+            )
+
+        if self._gemini_client is None or self._configured_api_key != api_key:
             try:
                 from google import genai
-                self._gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-                logger.info("EducationalTutorEngine connected to Google Gemini.")
+                from google.genai import types
+
+                self._gemini_client = genai.Client(
+                    api_key=api_key,
+                    http_options=types.HttpOptions(
+                        timeout=30000,
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                    ),
+                )
+                self._configured_api_key = api_key
+                logger.info("EducationalTutorEngine initialized Google Gemini client.")
             except Exception as e:
-                logger.warning(f"Could not initialize Gemini client: {e}")
+                logger.error(f"Failed to initialize Gemini client: {e}")
+                raise TutorGenerationError(
+                    f"Failed to initialize Gemini client: {str(e)}",
+                    status_code=500,
+                ) from e
+
+        return self._gemini_client
+
+    def _candidate_models(self) -> List[str]:
+        """Ordered deduplicated list of currently supported Gemini models."""
+        configured = (getattr(settings, "GEMINI_MODEL", "") or "").strip()
+        ordered: List[str] = []
+        if configured:
+            ordered.append(configured)
+        for model_name in SUPPORTED_GEMINI_MODELS:
+            if model_name not in ordered:
+                ordered.append(model_name)
+        return ordered
 
     def _level_why_it_works(self, level_str: str, topic_hint: str = "this principle") -> str:
-        """Return pedagogically appropriate rationale across beginner, intermediate, and advanced tiers."""
+        """Return pedagogically appropriate rationale metadata across difficulty tiers."""
         if level_str == "beginner":
             return (
-                f"Intuitive Concept: {topic_hint} works through real-world balance and intuitive proportions—"
-                "each step preserves the underlying relationship without unnecessary complexity."
+                f"Intuitive Concept: {topic_hint} builds from concrete intuition and everyday examples "
+                "so each idea connects naturally without unnecessary complexity."
             )
         if level_str == "advanced":
             return (
-                f"Axiomatic Justification: {topic_hint} follows from formal mathematical axioms, algebraic equivalence, "
-                "and physical conservation laws under domain constraints."
+                f"Axiomatic Justification: {topic_hint} follows formal principles, theoretical definitions, "
+                "and domain constraints rigorously."
             )
         return (
-            f"Why it works: {topic_hint} applies standard mathematical and scientific theorems through valid transformations."
+            f"Why it works: {topic_hint} connects core principles and examples through clear step-by-step reasoning."
         )
 
+    def _explicitly_requests_references(self, query: str) -> bool:
+        """Only retrieve or attach curriculum citations when explicitly requested."""
+        return bool(REFERENCE_REQUEST_PATTERN.search(query or ""))
+
     def _is_explicit_math_problem(self, query: str) -> bool:
-        """Detect if query is asking to compute/solve an explicit equation or calculus problem."""
+        """Detect imperative symbolic math requests where SymPy can verify calculations."""
         q_lower = query.lower().strip()
-        if re.search(r'\b(solve|simplify|factor|differentiate|integrate|calculate|evaluate)\b', q_lower):
-            # Check if there's an algebraic expression, number, or function rather than pure concept question
-            if re.search(r'(=|f\(x\)|x\^|\d)', q_lower) and not re.search(r'^(what is|what are|define|explain)\b', q_lower):
+        if re.search(
+            r'^(why|how come|explain why|what if|example|give an example|practice)\b',
+            q_lower,
+        ):
+            return False
+        if re.search(
+            r'\b(solve|simplify|factor|differentiate|integrate|calculate|evaluate|find the derivative|find the integral|find the limit)\b',
+            q_lower,
+        ):
+            if re.search(r'(=|f\(x\)|x\^|\d)', q_lower) and not re.search(
+                r'^(what is|what are|define|explain)\b', q_lower
+            ):
                 return True
-        if re.search(r'([a-zA-Z0-9\)]\s*=\s*[a-zA-Z0-9\-\+]|x\^\d|\bderivative of f\(|\bintegral of )', q_lower):
+        if re.search(
+            r'([a-zA-Z0-9\)]\s*=\s*[a-zA-Z0-9\-\+]|x\^\d|\bderivative of f\(|\bintegral of )',
+            q_lower,
+        ):
             if not re.search(r'^(what is the formula|what is)\b', q_lower):
                 return True
         return False
 
-    def _looks_like_code_request(self, query: str) -> bool:
-        """Detect Python code snippet debugging or analysis requests."""
-        return bool(re.search(r'(\bdef\s+\w+\(|\bfor\s+\w+\s+in\b|\bwhile\s+|```python)', query))
+    def _compute_sympy_verification(
+        self, query: str, level_enum: Any
+    ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+        """Run SymPy calculation check for explicit symbolic equations to ground Gemini's steps."""
+        if not self._is_explicit_math_problem(query) or not settings.ENABLE_SYMPY_VERIFICATION:
+            return False, None, None
 
-    def _query_llm_providers(
+        q_low = query.lower()
+        op = "solve"
+        if "derivative" in q_low or "differentiate" in q_low:
+            op = "differentiate"
+        elif "integral" in q_low or "integrate" in q_low:
+            op = "integrate"
+        elif "factor" in q_low:
+            op = "factor"
+        elif "limit" in q_low:
+            op = "limit"
+
+        try:
+            math_res = sympy_solver.solve(query, operation=op, level=level_enum)
+            if math_res.symbolic_verified:
+                sympy_data = {
+                    "operation": math_res.operation,
+                    "raw_result": math_res.result,
+                    "latex_result": math_res.latex_result,
+                }
+                step_notes = "; ".join(
+                    f"Step {s.step_number} ({s.title}): {s.explanation}"
+                    for s in math_res.steps
+                )
+                hint = (
+                    f"Symbolic Verification ({math_res.operation}): exact result = `{math_res.result}` "
+                    f"(LaTeX: `{math_res.latex_result}`). Steps: {step_notes}. "
+                    "Present this solution clearly using numbered steps (`Step 1:`, `Step 2:`, ...) and state `Final Answer`."
+                )
+                return True, sympy_data, hint
+        except Exception as e:
+            logger.debug(f"SymPy pre-check skipped for query '{query}': {e}")
+
+        return False, None, None
+
+    def _build_gemini_contents(
+        self,
+        turns: List[Dict[str, str]],
+        current_prompt: str,
+    ) -> List[Any]:
+        """Build valid alternating user/model Content messages for multi-turn Gemini memory."""
+        from google.genai import types
+
+        raw_messages: List[Tuple[str, str]] = []
+        for t in turns:
+            content = (t.get("content") or "").strip()
+            if not content:
+                continue
+            role = "model" if t.get("role") in ("assistant", "model") else "user"
+            if raw_messages and raw_messages[-1][0] == role:
+                prev_role, prev_text = raw_messages[-1]
+                raw_messages[-1] = (prev_role, f"{prev_text}\n\n{content}")
+            else:
+                raw_messages.append((role, content))
+
+        # Gemini multi-turn history must begin with a user turn when prior messages exist
+        while raw_messages and raw_messages[0][0] != "user":
+            raw_messages.pop(0)
+
+        # Ensure history ends with a model turn before appending the new user turn
+        if raw_messages and raw_messages[-1][0] == "user":
+            prev_role, prev_text = raw_messages.pop()
+            current_prompt = f"{prev_text}\n\n{current_prompt}"
+
+        contents = [
+            types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=text)],
+            )
+            for role, text in raw_messages
+        ]
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=current_prompt)],
+            )
+        )
+        return contents
+
+    def _classify_gemini_error(self, err: Exception) -> Tuple[int, str, bool]:
+        """Map Gemini SDK exception to (http_status, clear_message, should_try_next_model)."""
+        status_code = getattr(err, "code", None)
+        err_text = str(err)
+        err_upper = err_text.upper()
+
+        if status_code in (401, 403) or "API_KEY_INVALID" in err_upper or "API KEY NOT VALID" in err_upper or "PERMISSION_DENIED" in err_upper:
+            return (
+                502,
+                "Gemini API authentication failed: invalid or unauthorized GEMINI_API_KEY. Please verify backend/.env.",
+                False,
+            )
+        if status_code == 400 and "API_KEY" in err_upper:
+            return (
+                502,
+                "Gemini API rejected the configured GEMINI_API_KEY. Please check backend/.env.",
+                False,
+            )
+        if status_code == 429 or "RESOURCE_EXHAUSTED" in err_upper or "QUOTA" in err_upper:
+            return (
+                429,
+                "Gemini API quota or rate limit exceeded. Please wait a moment and try again.",
+                True,
+            )
+        if status_code == 404 or "NOT_FOUND" in err_upper:
+            return (
+                502,
+                f"Configured Gemini model is unavailable: {err_text[:180]}",
+                True,
+            )
+        if status_code in (500, 502, 503, 504) or "DEADLINE_EXCEEDED" in err_upper or "TIMED OUT" in err_upper or "TIMEOUT" in err_upper:
+            return (
+                504 if status_code == 504 else 503,
+                "Gemini AI service timed out or is temporarily unavailable. Please try again.",
+                True,
+            )
+        return (
+            502,
+            f"Gemini API request failed: {err_text[:220]}",
+            False,
+        )
+
+    def _generate_with_gemini(
         self,
         query: str,
         level: str,
         subject: str,
-        history_context: List[str],
-        rag_context: str
-    ) -> Optional[str]:
-        """Attempt live LLM generation via Gemini, OpenAI, Anthropic, or local Ollama."""
-        parts = []
-        if history_context:
-            parts.append("CONVERSATION HISTORY:\n" + "\n".join(history_context[-6:]))
+        turns: List[Dict[str, str]],
+        sympy_hint: Optional[str] = None,
+        rag_context: str = "",
+        references_requested: bool = False,
+    ) -> str:
+        """Call Google Gemini using structured multi-turn history and system instructions."""
+        from google.genai import types
+
+        client = self._get_gemini_client()
+
+        instruction_addons = [
+            f"Current Student Settings -> Pedagogical Depth: {level}; Subject Domain: {subject}."
+        ]
+        if not references_requested:
+            instruction_addons.append(
+                "Do NOT attach reference lists, external links, or [1]-style citation markers to this answer."
+            )
+        if turns:
+            instruction_addons.append(
+                "Prior turns from this session are included above; answer follow-ups directly in continuity with that discussion."
+            )
+
+        system_instruction = f"{EDUCATIONAL_TUTOR_SYSTEM_PROMPT}\n\n" + "\n".join(instruction_addons)
+
+        current_parts = [query]
+        if sympy_hint:
+            current_parts.append(f"[Internal Math Verification Note]\n{sympy_hint}")
         if rag_context:
-            parts.append("VERIFIED CURRICULUM EXCERPTS:\n" + rag_context)
-        parts.append(f"USER QUESTION (Depth: {level}, Subject: {subject}):\n{query}")
-        user_prompt = "\n\n".join(parts)
+            current_parts.append(f"[Requested Curriculum References]\n{rag_context}")
+        current_prompt = "\n\n".join(current_parts)
 
-        # 1. Google Gemini
-        if self._gemini_client:
-            for model_name in ("gemini-2.0-flash", "gemini-1.5-flash"):
-                try:
-                    resp = self._gemini_client.models.generate_content(
-                        model=model_name,
-                        contents=[CHATGPT_STYLE_SYSTEM_PROMPT, user_prompt]
-                    )
-                    if resp and resp.text and resp.text.strip():
-                        return re.sub(r'[\U00010000-\U0010ffff]', '', resp.text.strip())
-                except Exception as e:
-                    logger.debug(f"Gemini {model_name} call failed: {e}")
+        contents = self._build_gemini_contents(turns=turns, current_prompt=current_prompt)
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.4,
+        )
 
-        # 2. OpenAI API
-        if settings.OPENAI_API_KEY:
+        last_status = 502
+        last_message = "Gemini API request failed."
+
+        for model_name in self._candidate_models():
             try:
-                r = httpx.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                    json={
-                        "model": "gpt-4o-mini",
-                        "messages": [
-                            {"role": "system", "content": CHATGPT_STYLE_SYSTEM_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": 0.4,
-                    },
-                    timeout=15.0,
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=config,
                 )
-                if r.status_code == 200:
-                    text = r.json()["choices"][0]["message"]["content"].strip()
-                    return re.sub(r'[\U00010000-\U0010ffff]', '', text)
-            except Exception as e:
-                logger.debug(f"OpenAI call failed: {e}")
+                raw_text = (getattr(resp, "text", None) or "").strip()
+                if raw_text:
+                    # Strip any stray non-BMP emojis to keep output clean and TTS-friendly
+                    return re.sub(r'[\U00010000-\U0010ffff]', '', raw_text).strip()
 
-        # 3. Local Ollama (if user has Ollama running locally on port 11434)
-        if settings.ENVIRONMENT != "testing":
-            try:
-                tags = httpx.get("http://127.0.0.1:11434/api/tags", timeout=0.4)
-                if tags.status_code == 200:
-                    models = tags.json().get("models", [])
-                    if models:
-                        model_id = models[0]["name"]
-                        r = httpx.post(
-                            "http://127.0.0.1:11434/api/chat",
-                            json={
-                                "model": model_id,
-                                "stream": False,
-                                "messages": [
-                                    {"role": "system", "content": CHATGPT_STYLE_SYSTEM_PROMPT},
-                                    {"role": "user", "content": user_prompt},
-                                ],
-                            },
-                            timeout=20.0,
-                        )
-                        if r.status_code == 200:
-                            text = r.json().get("message", {}).get("content", "").strip()
-                            if text:
-                                return re.sub(r'[\U00010000-\U0010ffff]', '', text)
-            except Exception:
-                pass
+                last_status = 502
+                last_message = f"Gemini model '{model_name}' returned an empty response. Please rephrase your question and try again."
+                logger.warning(last_message)
+            except Exception as err:
+                status_code, err_msg, try_next = self._classify_gemini_error(err)
+                logger.error(f"Gemini error on model '{model_name}': {err}")
+                last_status = status_code
+                last_message = err_msg
+                if not try_next:
+                    raise TutorGenerationError(last_message, status_code=last_status) from err
 
-        return None
+        raise TutorGenerationError(last_message, status_code=last_status)
 
-    def _lookup_wikipedia_summary(self, query: str) -> Optional[Dict[str, str]]:
-        """Fetch accurate encyclopedic overview via Wikipedia REST API when no LLM API key is configured."""
-        if settings.ENVIRONMENT == "testing":
-            return None
-
-        cleaned = re.sub(
-            r'^(what is|what are|who is|who was|explain|define|tell me about|describe|how does|why does)\s+(an?\s+|the\s+)?',
-            '',
-            query.strip(),
-            flags=re.IGNORECASE
-        ).strip(" ?!.")
-        if not cleaned or len(cleaned) < 2:
-            return None
-
-        headers = {"User-Agent": "AIStudentTutor/1.0 (https://github.com/ai-tutor; educational@example.org)"}
-        try:
-            search_resp = httpx.get(
-                "https://en.wikipedia.org/w/rest.php/v1/search/page",
-                params={"q": cleaned, "limit": 2},
-                headers=headers,
-                follow_redirects=True,
-                timeout=3.5,
+    def _extract_solution_steps(self, markdown_text: str) -> List[SolutionStep]:
+        """Extract numbered step summaries from Gemini markdown for structured response metadata."""
+        matches = re.findall(
+            r'(?:^|\n)\s*(?:#{1,4}\s*)?(?:\*\*)?Step\s*(\d+)\s*:\s*([^\n*]+)(?:\*\*)?',
+            markdown_text,
+            re.IGNORECASE,
+        )
+        steps: List[SolutionStep] = []
+        for idx_str, title in matches[:10]:
+            steps.append(
+                SolutionStep(
+                    step_number=int(idx_str),
+                    title=title.strip(),
+                    explanation=title.strip(),
+                    math_expression=None,
+                )
             )
-            if search_resp.status_code != 200:
-                return None
-
-            pages = search_resp.json().get("pages", [])
-            if not pages:
-                return None
-
-            page_key = pages[0].get("key")
-            if not page_key:
-                return None
-
-            summary_resp = httpx.get(
-                f"https://en.wikipedia.org/api/rest_v1/page/summary/{page_key}",
-                headers=headers,
-                follow_redirects=True,
-                timeout=3.5,
-            )
-            if summary_resp.status_code != 200:
-                return None
-
-            data = summary_resp.json()
-            extract = (data.get("extract") or "").strip()
-            title = (data.get("title") or cleaned).strip()
-            url = data.get("content_urls", {}).get("desktop", {}).get("page", "")
-            if extract and len(extract) > 40:
-                return {"title": title, "extract": extract, "url": url}
-        except Exception as e:
-            logger.debug(f"Wikipedia fallback lookup skipped: {e}")
-
-        return None
+        if steps:
+            return steps
+        first_line = next((line.strip("#* ") for line in markdown_text.splitlines() if line.strip()), markdown_text[:180])
+        return [SolutionStep(step_number=1, title="Explanation", explanation=first_line[:180], math_expression=None)]
 
     def solve_problem(
         self,
         request: TutorProblemSolveRequest,
-        db: Session
+        db: Session,
+        user_id: Optional[str] = None,
+        student_id: Optional[str] = None,
     ) -> TutorProblemSolveResponse:
-        """Generate clean, human, ChatGPT-style educational answers or SymPy math solutions."""
+        """Generate a contextual, educational tutor response via Google Gemini."""
         query = request.query.strip()
-        level_str = request.level.value if hasattr(request.level, 'value') else str(request.level)
+        level_str = request.level.value if hasattr(request.level, "value") else str(request.level)
 
-        # 1. Conversation history context
-        turns, is_follow_up, prior_context = context_manager.extract_relevant_context(
-            session_id=request.session_id,
-            current_query=query,
-            db=db
-        )
+        # 1. Retrieve isolated conversation history for the current session
+        try:
+            turns, _, _ = context_manager.extract_relevant_context(
+                session_id=request.session_id,
+                current_query=query,
+                db=db,
+                user_id=user_id,
+                student_id=student_id,
+            )
+        except PermissionError as pe:
+            raise TutorGenerationError(str(pe), status_code=403) from pe
+
         history_context = [f"{t['role'].upper()}: {t['content']}" for t in turns]
 
-        # 2. Retrieve verified curriculum context if enabled
-        rag_citations = []
+        # 2. Retrieve RAG curriculum context ONLY when the student explicitly requests references/sources
+        references_requested = self._explicitly_requests_references(query)
+        rag_citations: List[RAGCitation] = []
         rag_context_text = ""
-        if request.include_rag_curriculum:
+        if request.include_rag_curriculum and references_requested:
             try:
-                rag_req = RAGQueryRequest(query=query, subject=request.subject, top_k=2)
+                rag_req = RAGQueryRequest(query=query, subject=request.subject, top_k=3)
                 rag_out = rag_service.execute_rag(rag_req, db=db)
                 if rag_out.is_context_sufficient and rag_out.citations:
                     rag_citations = rag_out.citations
                     rag_context_text = "\n\n".join(c.excerpt for c in rag_out.citations if c.excerpt)
             except Exception as e:
-                logger.debug(f"RAG retrieval skipped during problem solving: {e}")
+                logger.warning(f"Requested RAG retrieval skipped: {e}")
 
-        # 3. Tier 1: Live LLM (Gemini / OpenAI / local Ollama)
-        llm_answer = self._query_llm_providers(
+        # 3. Pre-verify symbolic math with SymPy when query is an explicit math computation
+        sympy_verified, sympy_details, sympy_hint = self._compute_sympy_verification(
+            query=query,
+            level_enum=request.level,
+        )
+
+        # 4. Generate authentic Gemini AI response (raises TutorGenerationError on failure — no silent fallback)
+        gemini_markdown = self._generate_with_gemini(
             query=query,
             level=level_str,
             subject=request.subject or "General",
-            history_context=history_context,
+            turns=turns,
+            sympy_hint=sympy_hint,
             rag_context=rag_context_text,
-        )
-        if llm_answer:
-            return self._wrap_response(
-                query=query,
-                formatted_md=llm_answer,
-                understanding=query,
-                steps=[SolutionStep(step_number=1, title="Explanation", explanation=llm_answer[:180], math_expression=None)],
-                final_answer="See explanation above.",
-                why_it_works=self._level_why_it_works(level_str, "this explanation"),
-                sympy_verified=False,
-                sympy_details=None,
-                level_str=level_str,
-                rag_citations=rag_citations,
-                history_context=history_context,
-                subject=request.subject,
-            )
-
-        # 4. Tier 2: Static Code Analysis if Python snippet is provided
-        if self._looks_like_code_request(query):
-            code_res = safe_code_assistant.analyze_code(code=query, language="python", level=request.level)
-            return self._wrap_response(
-                query=query,
-                formatted_md=code_res.formatted_markdown,
-                understanding="Static Python code analysis",
-                steps=[SolutionStep(step_number=1, title="AST Code Inspection", explanation=code_res.explanation, math_expression=None)],
-                final_answer=f"Complexity: {code_res.time_complexity}",
-                why_it_works=self._level_why_it_works(level_str, "AST complexity analysis"),
-                sympy_verified=False,
-                sympy_details=None,
-                level_str=level_str,
-                rag_citations=[],
-                history_context=history_context,
-                subject="Computer Science",
-            )
-
-        # 5. Tier 3: Symbolic Math Solving via SymPy (explicit equations / derivatives / integrals / factors)
-        if self._is_explicit_math_problem(query) and settings.ENABLE_SYMPY_VERIFICATION:
-            op = "solve"
-            q_low = query.lower()
-            if "derivative" in q_low or "differentiate" in q_low:
-                op = "differentiate"
-            elif "integral" in q_low or "integrate" in q_low:
-                op = "integrate"
-            elif "factor" in q_low:
-                op = "factor"
-            elif "limit" in q_low:
-                op = "limit"
-
-            try:
-                math_res = sympy_solver.solve(query, operation=op, level=request.level)
-                if math_res.symbolic_verified:
-                    sympy_data = {
-                        "operation": math_res.operation,
-                        "raw_result": math_res.result,
-                        "latex_result": math_res.latex_result,
-                    }
-                    final_ans = math_res.latex_result or math_res.result
-                    why = self._level_why_it_works(level_str, "symbolic algebraic derivation")
-                    md_lines = [
-                        "# Step-by-Step Educational Solution\n",
-                        f"Let's solve `{query}` step by step.\n",
-                    ]
-                    for s in math_res.steps:
-                        md_lines.append(f"### Step {s.step_number}: {s.title}")
-                        md_lines.append(s.explanation)
-                        if s.math_expression:
-                            md_lines.append(f"\n{s.math_expression}\n")
-                    md_lines.append("\n### Final Answer")
-                    md_lines.append(f"**{final_ans}**\n")
-                    md_lines.append("### Why This Works")
-                    md_lines.append(why)
-
-                    return self._wrap_response(
-                        query=query,
-                        formatted_md="\n".join(md_lines),
-                        understanding=f"Solving: {query}",
-                        steps=math_res.steps,
-                        final_answer=final_ans,
-                        why_it_works=why,
-                        sympy_verified=True,
-                        sympy_details=sympy_data,
-                        level_str=level_str,
-                        rag_citations=rag_citations,
-                        history_context=history_context,
-                        subject=request.subject,
-                    )
-            except Exception as e:
-                logger.debug(f"SymPy solver skipped: {e}")
-
-        # 6. Tier 4: Curated ChatGPT-style STEM Knowledge Base (with fuzzy spelling match)
-        # Also resolve anaphoric follow-ups using prior session turns (e.g. "discriminant is negative" after quadratic)
-        lookup_query = query
-        if is_follow_up and prior_context:
-            lookup_query = f"{query} {prior_context[:200]}"
-        concept_data = find_best_concept(lookup_query)
-        if not concept_data and query != lookup_query:
-            concept_data = find_best_concept(query)
-
-        if concept_data:
-            md_body = concept_data["explanation"]
-            if "discriminant" in query.lower() and "negative" in query.lower():
-                md_body = (
-                    "When the **discriminant** ($\\Delta = b^2 - 4ac$) is **negative** ($\Delta < 0$), "
-                    "we are taking the square root of a negative number inside the quadratic formula:\n\n"
-                    "$$x = \\frac{-b \\pm \\sqrt{\\Delta}}{2a}$$\n\n"
-                    "This means:\n"
-                    "- The equation has **no real roots** (its parabola never crosses the x-axis).\n"
-                    "- Instead, it has **two complex / imaginary conjugate roots**:\n\n"
-                    "$$x = \\frac{-b \\pm i\\sqrt{4ac - b^2}}{2a}$$\n\n"
-                    "### Example\n"
-                    "For $x^2 + 2x + 5 = 0$, $\\Delta = 2^2 - 4(1)(5) = -16$.\n"
-                    "So the roots are $x = -1 \\pm 2i$."
-                )
-
-            if level_str == "beginner":
-                md_body += "\n\nIn simple terms, focus first on what each symbol represents before substituting numbers."
-            elif level_str == "advanced":
-                md_body += "\n\n**Rigorous Note:** These results hold under standard real/complex field axioms and continuity assumptions."
-
-            return self._wrap_response(
-                query=query,
-                formatted_md=md_body,
-                understanding=f"Concept overview: {concept_data['title']}",
-                steps=concept_data.get("steps", []),
-                final_answer=concept_data.get("final_answer", concept_data["title"]),
-                why_it_works=self._level_why_it_works(level_str, concept_data["title"]),
-                sympy_verified=False,
-                sympy_details=None,
-                level_str=level_str,
-                rag_citations=rag_citations,
-                history_context=history_context,
-                subject=request.subject,
-            )
-
-        # 7. Tier 5: Live Wikipedia Encyclopedic Lookup for any general topic (outside testing)
-        wiki = self._lookup_wikipedia_summary(query)
-        if wiki:
-            md_lines = [
-                f"**{wiki['title']}**\n",
-                wiki["extract"],
-            ]
-            if wiki.get("url"):
-                md_lines.append(f"\nReference: [{wiki['title']}]({wiki['url']})")
-            md_lines.append("\nLet me know if you would like a simpler explanation, a real-world example, or practice questions on this topic.")
-            return self._wrap_response(
-                query=query,
-                formatted_md="\n".join(md_lines),
-                understanding=f"Overview of {wiki['title']}",
-                steps=[SolutionStep(step_number=1, title=wiki["title"], explanation=wiki["extract"], math_expression=None)],
-                final_answer=wiki["title"],
-                why_it_works=self._level_why_it_works(level_str, wiki["title"]),
-                sympy_verified=False,
-                sympy_details=None,
-                level_str=level_str,
-                rag_citations=rag_citations,
-                history_context=history_context,
-                subject=request.subject,
-            )
-
-        # 8. Tier 6: Grounded RAG Textbook Context (only when excerpts match query keywords meaningfully)
-        q_tokens = {w for w in re.findall(r'[a-z]{4,}', query.lower()) if w not in {"what", "explain", "define", "about", "where", "which"}}
-        if rag_citations and q_tokens:
-            matching_excerpts = [
-                c for c in rag_citations
-                if any(tok in c.excerpt.lower() for tok in q_tokens)
-            ]
-            if matching_excerpts:
-                top_cit = matching_excerpts[0]
-                excerpt = top_cit.excerpt.strip().replace("\n", " ")
-                md_text = (
-                    f"Based on **{top_cit.source_name}** (p. {top_cit.page_number}):\n\n"
-                    f"{excerpt}\n\n"
-                    "Would you like me to break any part of this down further?"
-                )
-                return self._wrap_response(
-                    query=query,
-                    formatted_md=md_text,
-                    understanding=query,
-                    steps=[SolutionStep(step_number=1, title="Curriculum Context", explanation=excerpt, math_expression=None)],
-                    final_answer=excerpt[:120],
-                    why_it_works=self._level_why_it_works(level_str, "curriculum grounding"),
-                    sympy_verified=False,
-                    sympy_details=None,
-                    level_str=level_str,
-                    rag_citations=matching_excerpts,
-                    history_context=history_context,
-                    subject=request.subject,
-                )
-
-        # 9. Honest, clear human fallback (never dump fake "Step 1: Understand the Goal" boilerplate)
-        why = self._level_why_it_works(level_str, "transparent uncertainty")
-        honest_msg = (
-            f"I could not find a verified answer for **\"{query}\"** in the offline knowledge base, "
-            "and no live LLM API key (`GEMINI_API_KEY` or `OPENAI_API_KEY`) is configured yet.\n\n"
-            "You can either:\n"
-            "- Rephrase with a specific math equation (e.g., `solve x^2 - 5x + 6 = 0`), physics/CS/math concept, or paste Python code to analyze.\n"
-            "- Or add a free Gemini API key to `backend/.env` (`GEMINI_API_KEY=...`) so I can answer any open-ended question naturally like ChatGPT."
-        )
-        return self._wrap_response(
-            query=query,
-            formatted_md=honest_msg,
-            understanding=f"Inquiry: {query}",
-            steps=[SolutionStep(step_number=1, title="Clarification Needed", explanation=honest_msg, math_expression=None)],
-            final_answer="No offline match found; add GEMINI_API_KEY in backend/.env or ask a STEM problem/equation.",
-            why_it_works=why,
-            sympy_verified=False,
-            sympy_details=None,
-            level_str=level_str,
-            rag_citations=[],
-            history_context=history_context,
-            subject=request.subject,
+            references_requested=references_requested,
         )
 
-    def _wrap_response(
-        self,
-        query: str,
-        formatted_md: str,
-        understanding: str,
-        steps: List[SolutionStep],
-        final_answer: str,
-        why_it_works: str,
-        sympy_verified: bool,
-        sympy_details: Optional[Dict[str, Any]],
-        level_str: str,
-        rag_citations: List[Any],
-        history_context: List[str],
-        subject: Optional[str],
-    ) -> TutorProblemSolveResponse:
-        """Validate response through Phase 7 audit and assemble schema payload."""
+        # 5. Validate output safely (consistency, math arithmetic check, Python AST check)
         val_req = AnswerValidationRequest(
             question=query,
-            answer=formatted_md,
+            answer=gemini_markdown,
             retrieved_chunks=[],
             citations=rag_citations,
-            subject=subject
+            subject=request.subject,
         )
         val_res = answer_validator.validate_answer(val_req)
 
+        final_answer_text = (
+            (sympy_details.get("latex_result") or sympy_details.get("raw_result"))
+            if sympy_details
+            else "See explanation above."
+        )
+        steps = self._extract_solution_steps(gemini_markdown)
+        why_it_works = self._level_why_it_works(
+            level_str,
+            request.subject or "this concept",
+        )
+
         return TutorProblemSolveResponse(
-            problem_understanding=understanding,
-            given_information=["Inquiry: " + query],
+            problem_understanding=query,
+            given_information=[f"Inquiry: {query}"],
             required_result="Clear educational explanation",
             steps=steps,
-            final_answer=final_answer,
+            final_answer=final_answer_text,
             why_it_works=why_it_works,
             sympy_verified=sympy_verified,
             sympy_details=sympy_details,
@@ -514,41 +478,67 @@ class EducationalTutorEngine:
             validation=val_res.model_dump(),
         )
 
+    def _next_message_timestamps(self, session_id: str, db: Session) -> Tuple[datetime, datetime]:
+        """Produce strictly monotonic timestamps so user turns always precede assistant replies."""
+        latest = (
+            db.query(SessionMessage.created_at)
+            .filter(SessionMessage.session_id == session_id)
+            .order_by(SessionMessage.created_at.desc())
+            .first()
+        )
+        now = datetime.utcnow()
+        if latest and latest[0] is not None and now <= latest[0]:
+            now = latest[0] + timedelta(milliseconds=1)
+        return now, now + timedelta(milliseconds=1)
+
     def chat_turn(
         self,
         request: TutorChatRequest,
-        db: Session
+        db: Session,
+        user_id: Optional[str] = None,
+        student_id: Optional[str] = None,
     ) -> TutorChatResponse:
-        """Handle conversational multi-turn follow-up question while maintaining thread context."""
+        """Handle conversational multi-turn tutor dialogue while keeping strict session isolation."""
         session = db.query(StudySession).filter(StudySession.id == request.session_id).first()
+        if session:
+            if session.user_id is not None and user_id is not None and session.user_id != user_id:
+                raise TutorGenerationError("Access denied: you do not own this study session.", status_code=403)
+            if session.user_id is not None and user_id is None:
+                raise TutorGenerationError("Authentication required to access this study session.", status_code=403)
+            if session.user_id is None and student_id and session.student_id and session.student_id != student_id:
+                raise TutorGenerationError("Access denied: session belongs to another student.", status_code=403)
+
+        # Solve using PRIOR session history BEFORE writing the current turn (prevents duplication and orphan rows on error)
+        solve_req = TutorProblemSolveRequest(
+            query=request.message,
+            session_id=session.id if session else None,
+            subject=session.subject if session else None,
+            level=request.level,
+            include_rag_curriculum=self._explicitly_requests_references(request.message),
+        )
+        solved = self.solve_problem(solve_req, db=db, user_id=user_id, student_id=student_id)
+
         if not session:
             session = StudySession(
                 id=request.session_id,
+                user_id=user_id,
+                student_id=student_id or "default_student",
                 title=f"Tutoring: {request.message[:30]}",
-                subject="General STEM"
+                subject="General STEM",
             )
             db.add(session)
             db.commit()
 
+        user_ts, assistant_ts = self._next_message_timestamps(session.id, db)
         user_msg = SessionMessage(
             session_id=session.id,
             sender_role="user",
             content_type="text",
             content=request.message,
             input_type="text",
-            extracted_question=request.message
+            extracted_question=request.message,
+            created_at=user_ts,
         )
-        db.add(user_msg)
-        db.commit()
-
-        solve_req = TutorProblemSolveRequest(
-            query=request.message,
-            session_id=session.id,
-            subject=session.subject,
-            level=request.level
-        )
-        solved = self.solve_problem(solve_req, db=db)
-
         assistant_msg = SessionMessage(
             session_id=session.id,
             sender_role="assistant",
@@ -556,9 +546,10 @@ class EducationalTutorEngine:
             content=solved.formatted_markdown,
             input_type="text",
             extracted_question=request.message,
-            citations_json=json.dumps([c.model_dump() for c in solved.citations]) if solved.citations else None
+            citations_json=json.dumps([c.model_dump() for c in solved.citations]) if solved.citations else None,
+            created_at=assistant_ts,
         )
-        db.add(assistant_msg)
+        db.add_all([user_msg, assistant_msg])
         db.commit()
         db.refresh(assistant_msg)
 
@@ -569,7 +560,7 @@ class EducationalTutorEngine:
             level=solved.level,
             sympy_verified=solved.sympy_verified,
             citations=solved.citations,
-            validation=solved.validation
+            validation=solved.validation,
         )
 
 

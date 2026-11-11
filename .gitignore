@@ -1,11 +1,16 @@
 # Environments & Secrets
 .env
+.env.*
 .env.local
 *.env
 !.env.example
+!.env.production.example
+!**/.env.example
 
 # Python
 __pycache__/
+*.pyc
+*.pyo
 *.py[cod]
 *$py.class
 *.so
@@ -33,6 +38,9 @@ wheels/
 .coverage
 htmlcov/
 
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
 # Node / Frontend
 node_modules/
 dist/
@@ -43,7 +51,20 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Database & Storage
+# Logs
+*.log
+logs/
+
+# Model Checkpoints & Large Generated Artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.bin
+*.gguf
+
+# Database & Runtime Storage
 *.sqlite
 *.sqlite3
 *.db
@@ -56,4 +77,4 @@ storage/
 .idea/
 .DS_Store
 Thumbs.db
-
+desktop.ini

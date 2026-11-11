@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     
     # Multimodal AI Keys
     GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     
@@ -64,7 +65,7 @@ class Settings(BaseSettings):
     ENABLE_FILE_LOGGING: bool = False
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=(".env", "../.env", "backend/.env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

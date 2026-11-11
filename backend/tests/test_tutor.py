@@ -208,7 +208,8 @@ def test_tutor_api_endpoints(client, db_session: Session):
     assert res_solve.status_code == 200
     solve_json = res_solve.json()
     assert solve_json["sympy_verified"] is True
-    assert "Step-by-Step" in solve_json["formatted_markdown"]
+    assert "Step 1:" in solve_json["formatted_markdown"]
+    assert "-4" in solve_json["formatted_markdown"] and "4" in solve_json["formatted_markdown"]
 
     # 2. POST /api/v1/tutor/math
     res_math = client.post("/api/v1/tutor/math", json={
